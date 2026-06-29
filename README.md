@@ -142,7 +142,30 @@ supabase/schema.sql                 Database + RLS + Storage setup
 
 ---
 
-## 6. Deploy
+## 6. Running on Replit (import from GitHub)
+
+1. **Create Repl** → *Import from GitHub* →
+   `centralgroupevents/FieldDaytracker`. The committed [`.replit`](.replit)
+   file sets Node 20, the run command (`next dev -H 0.0.0.0`), and the port map.
+2. **Secrets** (lock icon, *not* a `.env.local`): add every variable from
+   [`.env.local.example`](.env.local.example) — same names. `NEXT_PUBLIC_*`
+   secrets are read at build/runtime just like locally.
+3. Press **Run**. `npm install` runs automatically; open the webview.
+4. **Supabase Auth** → *Authentication → URL Configuration*: add your Repl URL
+   (`https://<repl>.<user>.replit.dev`) to **Site URL** and **Redirect URLs**
+   (e.g. `https://<repl>.<user>.replit.dev/**`). The magic-link callback uses
+   `window.location.origin`, so it follows the Replit domain automatically.
+5. **AfterShip webhook** → point it at
+   `https://<repl>.<user>.replit.dev/api/webhooks/aftership`.
+6. For a stable URL, hit **Deploy** (Autoscale). `.replit` already defines the
+   `build`/`start` commands; re-add the same Secrets to the deployment.
+
+> The dev webview URL changes per session. For webhooks/auth that need a fixed
+> URL, use a Replit **Deployment** rather than the dev webview.
+> `allowedDevOrigins` in `next.config.js` is what lets the Replit proxy reach
+> the dev server (Next 15 blocks cross-origin dev requests by default).
+
+## 7. Deploy
 
 Deploy to Vercel, set all env vars in the project settings, and point your
 AfterShip webhook + Supabase Auth redirect URL (`/auth/callback`) at the

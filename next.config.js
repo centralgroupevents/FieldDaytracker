@@ -9,6 +9,9 @@ const supabaseHost = (() => {
 })();
 
 const nextConfig = {
+  // Allow Replit's proxy domains to reach the dev server (Next 15 blocks
+  // cross-origin dev requests otherwise). Harmless outside Replit.
+  allowedDevOrigins: ["*.replit.dev", "*.repl.co", "*.replit.app"],
   images: {
     remotePatterns: [
       {

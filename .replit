@@ -1,0 +1,18 @@
+modules = ["nodejs-20"]
+
+# Dev: bind to all interfaces so Replit's webview can reach it.
+run = "npm run dev -- -H 0.0.0.0 -p 3000"
+
+[env]
+NEXT_TELEMETRY_DISABLED = "1"
+
+# Map the Next.js port to the public Replit URL.
+[[ports]]
+localPort = 3000
+externalPort = 80
+
+# Production deployment (Replit "Deploy" button -> Autoscale).
+[deployment]
+deploymentTarget = "autoscale"
+build = ["npm", "run", "build"]
+run = ["npm", "run", "start", "--", "-H", "0.0.0.0"]
