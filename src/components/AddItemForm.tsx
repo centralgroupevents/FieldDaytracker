@@ -36,13 +36,63 @@ const EMPTY: FormState = {
   tracking_url: "",
 };
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+/**
+ * Downscales an image in the browser (max ~1280px, JPEG) before sending it to
+ * the AI. A phone/desktop screenshot can be several MB; this shrinks it to
+ * ~100-200KB so the request doesn't time out through the dev proxy.
+ */
+async function fileToScaledBase64(
+  file: File,
+  maxDim = 1280,
+  quality = 0.7
+): Promise<{ base64: string; mimeType: string }> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = reject;
+    r.readAsDataURL(file);
   });
+
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = dataUrl;
+    });
+    let { width, height } = img;
+    if (width > maxDim || height > maxDim) {
+      const scale = Math.min(maxDim / width, maxDim / height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no canvas");
+    ctx.drawImage(img, 0, 0, width, height);
+    const out = canvas.toDataURL("image/jpeg", quality);
+    return { base64: out.split(",")[1] ?? "", mimeType: "image/jpeg" };
+  } catch {
+    // Fall back to the original bytes if canvas processing fails.
+    return { base64: dataUrl.split(",")[1] ?? "", mimeType: file.type };
+  }
+}
+
+/** Reads a response as JSON, but surfaces a real message on empty/non-JSON. */
+async function safeJson(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text) {
+    throw new Error(
+      `Server returned an empty response (status ${res.status}). The image may be too large or the request timed out — try again.`
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Unexpected server response (status ${res.status}).`);
+  }
 }
 
 export default function AddItemForm() {
@@ -95,13 +145,13 @@ export default function AddItemForm() {
       setReceiptFile(f);
       setReceiptPreview(URL.createObjectURL(f));
 
-      const base64 = await fileToBase64(f);
+      const { base64, mimeType } = await fileToScaledBase64(f);
       const res = await fetch("/api/ai/parse-receipt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mimeType: f.type }),
+        body: JSON.stringify({ imageBase64: base64, mimeType }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || "Scan failed");
 
       const items: any[] = Array.isArray(data.items) ? data.items : [];
@@ -149,7 +199,7 @@ export default function AddItemForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: linkUrl.trim() }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || "Fetch failed");
       if (data.note) setAiNote(data.note);
       setForm((prev) => ({
@@ -180,7 +230,7 @@ export default function AddItemForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trackingNumber: trackingInput.trim() }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || "Detect failed");
       if (data.note) setAiNote(data.note);
       setForm((prev) => ({
