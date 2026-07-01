@@ -2,7 +2,7 @@
  * Minimal Gemini REST helper (no SDK — version-stable).
  * Returns parsed JSON from the model. Server-only (uses GEMINI_API_KEY).
  */
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 export async function geminiJson(opts: {
   prompt: string;
