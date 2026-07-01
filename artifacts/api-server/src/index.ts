@@ -180,6 +180,52 @@ app.patch("/api/inventory/:id/stock", requireAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// PATCH /api/inventory/:id/target  (needed / target quantity)
+// ---------------------------------------------------------------------------
+app.patch("/api/inventory/:id/target", requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const newTarget = Number(req.body.target ?? req.body.target_quantity);
+
+  const { data: existing, error: fetchErr } = await supabaseAdmin
+    .from("inventory_items")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (fetchErr || !existing) {
+    res.status(404).json({ error: fetchErr?.message || "Item not found." });
+    return;
+  }
+
+  const previous = existing as InventoryItem;
+  const target_quantity = Math.max(0, Math.trunc(newTarget));
+  const delta = target_quantity - previous.current_stock;
+
+  // Same auto-status rule as stock: needing units flips Needed -> Pending Order.
+  let status = previous.status;
+  if (delta > 0) {
+    if (previous.status === "Needed") status = "Pending Order";
+  } else if (previous.status === "Pending Order") {
+    status = "Needed";
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("inventory_items")
+    .update({ target_quantity, status })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  const item = data as InventoryItem;
+  runStatusSideEffects(item, previous.status).catch(console.error);
+  res.json({ ok: true, item });
+});
+
+// ---------------------------------------------------------------------------
 // PATCH /api/inventory/:id/status
 // ---------------------------------------------------------------------------
 app.patch("/api/inventory/:id/status", requireAuth, async (req, res) => {
