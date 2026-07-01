@@ -1,8 +1,15 @@
-import { useEffect, useState } from "react";
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2, Plus, Trash2, Check, Camera, X } from "lucide-react";
-import { apiFetch } from "../lib/api";
-import { supabase } from "../lib/supabase";
-import { EXPENSE_CATEGORIES, type Expense } from "../lib/types";
+import { createClient } from "@/lib/supabase/client";
+import {
+  createExpense,
+  updateExpense,
+  deleteExpense,
+} from "@/app/actions/expenses";
+import { EXPENSE_CATEGORIES, type Expense } from "@/lib/types";
 
 function money(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -21,11 +28,13 @@ const CATEGORY_STYLES: Record<string, string> = {
 };
 
 const inputClass =
-  "w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20";
+  "w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20";
 
-export default function ExpensesPage() {
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function ExpensesClient({ initial }: { initial: Expense[] }) {
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [expenses, setExpenses] = useState<Expense[]>(initial);
   const [error, setError] = useState<string | null>(null);
 
   const [description, setDescription] = useState("");
@@ -34,7 +43,12 @@ export default function ExpensesPage() {
   const [notes, setNotes] = useState("");
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  const total = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const unpaid = expenses
+    .filter((e) => !e.paid)
+    .reduce((s, e) => s + Number(e.amount), 0);
 
   async function uploadPhoto(file: File): Promise<string> {
     const ext = file.name.split(".").pop() || "jpg";
@@ -46,67 +60,56 @@ export default function ExpensesPage() {
     return supabase.storage.from("item-images").getPublicUrl(path).data.publicUrl;
   }
 
-  useEffect(() => {
-    apiFetch("/api/expenses")
-      .then((r) => r.json())
-      .then((d) => setExpenses(Array.isArray(d) ? d : []))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const total = expenses.reduce((s, e) => s + Number(e.amount), 0);
-  const unpaid = expenses
-    .filter((e) => !e.paid)
-    .reduce((s, e) => s + Number(e.amount), 0);
-
-  async function addExpense(e: React.FormEvent) {
+  function addExpense(e: React.FormEvent) {
     e.preventDefault();
     if (!description.trim()) return;
-    setSaving(true);
     setError(null);
-    try {
-      const receipt_url = receiptFile ? await uploadPhoto(receiptFile) : null;
-      const res = await apiFetch("/api/expenses", {
-        method: "POST",
-        body: JSON.stringify({
+    startTransition(async () => {
+      try {
+        const receipt_url = receiptFile ? await uploadPhoto(receiptFile) : null;
+        const res = await createExpense({
           description: description.trim(),
           amount: Number(amount) || 0,
           category,
           notes: notes || null,
           receipt_url,
           paid: false,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add");
-      setExpenses((prev) => [data.expense, ...prev]);
-      setDescription("");
-      setAmount("");
-      setNotes("");
-      setCategory("Permit");
-      setReceiptFile(null);
-      setReceiptPreview(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add expense");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function togglePaid(exp: Expense) {
-    const res = await apiFetch(`/api/expenses/${exp.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ paid: !exp.paid }),
+        });
+        if (!res.ok || !res.expense) throw new Error(res.error || "Failed to add");
+        setExpenses((prev) => [res.expense as Expense, ...prev]);
+        setDescription("");
+        setAmount("");
+        setNotes("");
+        setCategory("Permit");
+        setReceiptFile(null);
+        setReceiptPreview(null);
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to add expense");
+      }
     });
-    const data = await res.json();
-    if (res.ok && data.expense) {
-      setExpenses((prev) => prev.map((e) => (e.id === exp.id ? data.expense : e)));
-    }
   }
 
-  async function remove(id: string) {
-    const res = await apiFetch(`/api/expenses/${id}`, { method: "DELETE" });
-    if (res.ok) setExpenses((prev) => prev.filter((e) => e.id !== id));
+  function togglePaid(exp: Expense) {
+    startTransition(async () => {
+      const res = await updateExpense(exp.id, { paid: !exp.paid });
+      if (res.ok && res.expense) {
+        setExpenses((prev) =>
+          prev.map((e) => (e.id === exp.id ? (res.expense as Expense) : e))
+        );
+        router.refresh();
+      }
+    });
+  }
+
+  function remove(id: string) {
+    startTransition(async () => {
+      const res = await deleteExpense(id);
+      if (res.ok) {
+        setExpenses((prev) => prev.filter((e) => e.id !== id));
+        router.refresh();
+      }
+    });
   }
 
   return (
@@ -174,6 +177,7 @@ export default function ExpensesPage() {
           </span>
           {receiptPreview ? (
             <div className="relative inline-block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={receiptPreview}
                 alt="Receipt"
@@ -192,7 +196,7 @@ export default function ExpensesPage() {
               </button>
             </div>
           ) : (
-            <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 hover:border-blue-600 hover:text-blue-600">
+            <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 hover:border-brand hover:text-brand">
               <Camera className="h-5 w-5" />
               <span className="text-[10px] font-medium">Snap / upload</span>
               <input
@@ -211,10 +215,10 @@ export default function ExpensesPage() {
         </div>
         <button
           type="submit"
-          disabled={saving || !description.trim()}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+          disabled={pending || !description.trim()}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
         >
-          {saving ? (
+          {pending ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Plus className="h-4 w-4" />
@@ -229,11 +233,7 @@ export default function ExpensesPage() {
         </p>
       )}
 
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-        </div>
-      ) : expenses.length === 0 ? (
+      {expenses.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
           No expenses yet. Add permits, payments, and vendor costs above.
         </p>
@@ -275,10 +275,11 @@ export default function ExpensesPage() {
                       rel="noopener noreferrer"
                       className="mt-2 inline-block"
                     >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={exp.receipt_url}
                         alt="Receipt"
-                        className="h-14 w-14 rounded-lg object-cover ring-1 ring-gray-200 hover:ring-blue-400"
+                        className="h-14 w-14 rounded-lg object-cover ring-1 ring-gray-200 hover:ring-brand"
                       />
                     </a>
                   )}

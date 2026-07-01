@@ -1,1 +1,0 @@
-- [Fieldday workspace setup](fieldday-workspace.md) — pnpm-workspace.yaml + tsconfig.base.json must exist at repo root; css.postcss override needed in vite.config.ts to block Tailwind v3 from root

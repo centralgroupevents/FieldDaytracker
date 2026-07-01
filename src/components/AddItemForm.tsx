@@ -24,6 +24,7 @@ type FormState = {
   carrier: string;
   tracking_number: string;
   tracking_url: string;
+  notes: string;
 };
 
 const EMPTY: FormState = {
@@ -34,6 +35,16 @@ const EMPTY: FormState = {
   carrier: "",
   tracking_number: "",
   tracking_url: "",
+  notes: "",
+};
+
+/** An item waiting in the multi-item receipt queue. */
+type QueuedItem = {
+  item_name: string;
+  unit_price?: number | null;
+  quantity?: number | null;
+  carrier?: string | null;
+  tracking_number?: string | null;
 };
 
 /**
@@ -118,6 +129,10 @@ export default function AddItemForm() {
   );
   const [aiNote, setAiNote] = useState<string | null>(null);
 
+  // Multi-item queue (from a receipt with several products).
+  const [queue, setQueue] = useState<QueuedItem[]>([]);
+  const [queueTotal, setQueueTotal] = useState(0);
+
   const [uploading, setUploading] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -131,6 +146,37 @@ export default function AddItemForm() {
     const f = e.target.files?.[0] ?? null;
     setReceiptFile(f);
     setReceiptPreview(f ? URL.createObjectURL(f) : null);
+  }
+
+  /** Load a queued item into the form (resets fields, keeps the receipt photo). */
+  function fillFromItem(it: QueuedItem) {
+    setForm({
+      ...EMPTY,
+      item_name: it.item_name ?? "",
+      unit_price: it.unit_price != null ? String(it.unit_price) : "0",
+      current_stock: it.quantity != null ? String(it.quantity) : "0",
+      carrier: it.carrier ?? "",
+      tracking_number: it.tracking_number ?? "",
+    });
+    setItemFile(null);
+    setItemPreview(null);
+  }
+
+  /** Skip the current item and load the next queued one without saving. */
+  function loadNext() {
+    if (queue.length === 0) return;
+    const [next, ...rest] = queue;
+    setQueue(rest);
+    fillFromItem(next);
+    setError(null);
+    setAiNote(null);
+  }
+
+  /** Drop all remaining queued items (keeps whatever is in the form now). */
+  function clearQueue() {
+    setQueue([]);
+    setQueueTotal(0);
+    setAiNote(null);
   }
 
   // ---- AI: scan a receipt photo -> fill fields (and keep it as receipt photo)
@@ -170,13 +216,18 @@ export default function AddItemForm() {
         carrier: data.carrier ?? prev.carrier,
         tracking_number: data.tracking_number ?? prev.tracking_number,
       }));
-      if (items.length > 1) {
+      const rest: QueuedItem[] = items.slice(1).map((i) => ({
+        item_name: i.item_name,
+        unit_price: i.unit_price,
+        quantity: i.quantity,
+        carrier: data.carrier ?? null,
+        tracking_number: data.tracking_number ?? null,
+      }));
+      setQueue(rest);
+      setQueueTotal(items.length);
+      if (rest.length > 0) {
         setAiNote(
-          `Filled the first item. ${items.length - 1} more on the receipt: ${items
-            .slice(1)
-            .map((i) => i.item_name)
-            .filter(Boolean)
-            .join(", ")} — add them separately.`
+          `Filled item 1 of ${items.length}. ${rest.length} more queued — save this one and the next auto-fills.`
         );
       }
     } catch (err) {
@@ -282,11 +333,32 @@ export default function AddItemForm() {
           carrier: form.carrier || null,
           tracking_number: form.tracking_number || null,
           tracking_url: form.tracking_url || null,
+          notes: form.notes || null,
         });
         if (!res.ok) {
           setError(res.error ?? "Failed to create item.");
           return;
         }
+
+        // If more items are queued from the receipt, load the next and stay.
+        if (queue.length > 0) {
+          const savedCount = queueTotal - queue.length;
+          const [next, ...rest] = queue;
+          setQueue(rest);
+          fillFromItem(next);
+          setAiNote(
+            `Saved item ${savedCount} of ${queueTotal}. Now editing item ${
+              savedCount + 1
+            } of ${queueTotal}${
+              rest.length ? ` — ${rest.length} more after this.` : "."
+            }`
+          );
+          if (typeof window !== "undefined")
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          router.refresh();
+          return;
+        }
+
         setForm(EMPTY);
         router.push("/inventory");
         router.refresh();
@@ -390,6 +462,32 @@ export default function AddItemForm() {
         )}
       </div>
 
+      {/* ---- Multi-item queue banner ---- */}
+      {queue.length > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span className="min-w-0">
+            <strong>{queue.length}</strong> more queued · Next:{" "}
+            <strong className="break-words">{queue[0].item_name}</strong>
+          </span>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={loadNext}
+              className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-xs font-medium hover:bg-amber-100"
+            >
+              Skip
+            </button>
+            <button
+              type="button"
+              onClick={clearQueue}
+              className="rounded-lg px-2 py-1 text-xs font-medium text-amber-700 hover:underline"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ---- Photos ---- */}
       <div className="grid grid-cols-2 gap-4">
         <PhotoSlot
@@ -483,6 +581,16 @@ export default function AddItemForm() {
         />
       </Field>
 
+      <Field label="Notes">
+        <textarea
+          value={form.notes}
+          onChange={(e) => setField("notes", e.target.value)}
+          placeholder="Any extra details…"
+          rows={3}
+          className={inputClass}
+        />
+      </Field>
+
       {error && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
@@ -495,7 +603,13 @@ export default function AddItemForm() {
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-brand-dark disabled:opacity-60"
       >
         {(pending || uploading) && <Loader2 className="h-5 w-5 animate-spin" />}
-        {uploading ? "Uploading photos…" : pending ? "Saving…" : "Add Item"}
+        {uploading
+          ? "Uploading photos…"
+          : pending
+            ? "Saving…"
+            : queue.length > 0
+              ? "Add & Next"
+              : "Add Item"}
       </button>
     </form>
   );

@@ -1,23 +1,27 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { Minus, Plus, Loader2 } from "lucide-react";
-import { updateStock } from "@/app/actions/inventory";
+import { updateStock, updateTarget } from "@/app/actions/inventory";
 
 /**
- * Inline stepper to quickly adjust current_stock. Optimistically updates the
- * displayed count, calls the updateStock server action, and reverts on error.
+ * Inline +/- stepper. Adjusts current_stock or target_quantity depending on
+ * `field`, via the matching server action. Optimistic; reverts on error.
  */
 export default function QuickEdit({
   id,
-  stock,
+  value: initial,
+  field = "stock",
 }: {
   id: string;
-  stock: number;
+  value: number;
+  field?: "stock" | "target";
 }) {
-  const [value, setValue] = useState(stock);
+  const [value, setValue] = useState(initial);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => setValue(initial), [initial]);
 
   function commit(next: number) {
     const clamped = Math.max(0, next);
@@ -25,22 +29,29 @@ export default function QuickEdit({
     setValue(clamped);
     setError(null);
     startTransition(async () => {
-      const res = await updateStock(id, clamped);
+      const res =
+        field === "stock"
+          ? await updateStock(id, clamped)
+          : await updateTarget(id, clamped);
       if (!res.ok) {
         setValue(previous);
         setError(res.error ?? "Update failed");
       } else if (res.item) {
-        setValue(res.item.current_stock);
+        setValue(
+          field === "stock" ? res.item.current_stock : res.item.target_quantity
+        );
       }
     });
   }
 
+  const label = field === "stock" ? "stock" : "target";
+
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-center gap-1">
       <div className="flex items-center gap-1.5">
         <button
           type="button"
-          aria-label="Decrease stock"
+          aria-label={`Decrease ${label}`}
           onClick={() => commit(value - 1)}
           disabled={pending || value <= 0}
           className="grid h-8 w-8 place-items-center rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40"
@@ -48,7 +59,7 @@ export default function QuickEdit({
           <Minus className="h-4 w-4" />
         </button>
 
-        <span className="min-w-[2.5rem] text-center text-sm font-semibold tabular-nums">
+        <span className="min-w-[2rem] text-center text-sm font-semibold tabular-nums">
           {pending ? (
             <Loader2 className="mx-auto h-4 w-4 animate-spin text-gray-400" />
           ) : (
@@ -58,7 +69,7 @@ export default function QuickEdit({
 
         <button
           type="button"
-          aria-label="Increase stock"
+          aria-label={`Increase ${label}`}
           onClick={() => commit(value + 1)}
           disabled={pending}
           className="grid h-8 w-8 place-items-center rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40"

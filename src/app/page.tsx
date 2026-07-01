@@ -1,6 +1,6 @@
 import { DollarSign, PackageX, Truck } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
-import type { InventoryItem } from "@/lib/types";
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { InventoryItem, Expense } from "@/lib/types";
 import KpiCard from "@/components/KpiCard";
 import InventoryList from "@/components/InventoryList";
 
@@ -16,15 +16,21 @@ function money(n: number): string {
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("inventory_items")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const supabase = createAdminClient();
+  const [{ data, error }, { data: expData }] = await Promise.all([
+    supabase
+      .from("inventory_items")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    supabase.from("expenses").select("*"),
+  ]);
 
   const items = (data ?? []) as InventoryItem[];
+  const expenses = (expData ?? []) as Expense[];
 
-  const totalSpent = items.reduce((sum, i) => sum + Number(i.total_cost), 0);
+  const inventorySpent = items.reduce((sum, i) => sum + Number(i.total_cost), 0);
+  const expensesSpent = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const totalSpent = inventorySpent + expensesSpent;
   const itemsMissing = items.filter((i) => i.delta > 0).length;
   const inTransit = items.filter((i) => i.status === "Shipped").length;
 
@@ -42,6 +48,7 @@ export default async function DashboardPage() {
           value={money(totalSpent)}
           icon={DollarSign}
           accent="text-emerald-600"
+          sub={`Items ${money(inventorySpent)} · Expenses ${money(expensesSpent)}`}
         />
         <KpiCard
           label="Items Missing"

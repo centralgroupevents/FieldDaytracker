@@ -24,8 +24,32 @@ export interface InventoryItem {
   tracking_url: string | null;
   /** Separate receipt photo (item photo lives in image_url). */
   receipt_url: string | null;
+  notes: string | null;
   /** Generated in Postgres: unit_price * current_stock */
   total_cost: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const EXPENSE_CATEGORIES = [
+  "Permit",
+  "Labor",
+  "Vendor",
+  "Rental",
+  "Food",
+  "Other",
+] as const;
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+export interface Expense {
+  id: string;
+  description: string;
+  amount: number;
+  category: string;
+  paid: boolean;
+  notes: string | null;
+  receipt_url: string | null;
   created_at: string;
   updated_at: string;
 }

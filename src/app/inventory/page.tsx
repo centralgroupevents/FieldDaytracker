@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { PlusCircle } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { InventoryItem } from "@/lib/types";
 import InventoryList from "@/components/InventoryList";
 
 export const dynamic = "force-dynamic";
 
 export default async function InventoryPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("inventory_items")
     .select("*")

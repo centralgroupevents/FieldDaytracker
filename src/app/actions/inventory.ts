@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { sendStatusEmail } from "@/lib/email";
 import { appendItemToSheet } from "@/lib/sheets";
 import {
@@ -69,8 +69,9 @@ export async function createItem(input: {
   carrier?: string | null;
   tracking_number?: string | null;
   tracking_url?: string | null;
+  notes?: string | null;
 }): Promise<ActionResult> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const name = input.item_name?.trim();
   if (!name) return { ok: false, error: "Item name is required." };
@@ -95,6 +96,7 @@ export async function createItem(input: {
       carrier: input.carrier || null,
       tracking_number: input.tracking_number || null,
       tracking_url: input.tracking_url || null,
+      notes: input.notes || null,
       status,
     })
     .select("*")
@@ -120,7 +122,7 @@ export async function updateStock(
   id: string,
   newStock: number
 ): Promise<ActionResult> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: existing, error: fetchErr } = await supabase
     .from("inventory_items")
@@ -177,7 +179,7 @@ export async function setStatus(
     return { ok: false, error: `Invalid status: ${status}` };
   }
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: existing } = await supabase
     .from("inventory_items")
@@ -207,10 +209,85 @@ export async function setStatus(
 }
 
 // ---------------------------------------------------------------------------
+// Update target (needed) quantity — same auto-status rule as stock
+// ---------------------------------------------------------------------------
+export async function updateTarget(
+  id: string,
+  newTarget: number
+): Promise<ActionResult> {
+  const supabase = createAdminClient();
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from("inventory_items")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (fetchErr || !existing) {
+    return { ok: false, error: fetchErr?.message || "Item not found." };
+  }
+
+  const previous = existing as InventoryItem;
+  const target_quantity = Math.max(0, Math.trunc(Number(newTarget) || 0));
+  const delta = target_quantity - previous.current_stock;
+
+  let status = previous.status;
+  if (delta > 0) {
+    if (previous.status === "Needed") status = "Pending Order";
+  } else if (previous.status === "Pending Order") {
+    status = "Needed";
+  }
+
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .update({ target_quantity, status })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("[updateTarget]", error.message);
+    return { ok: false, error: error.message };
+  }
+
+  const item = data as InventoryItem;
+  await runStatusSideEffects(item, previous.status);
+
+  revalidatePath("/");
+  revalidatePath("/inventory");
+  return { ok: true, item };
+}
+
+// ---------------------------------------------------------------------------
+// Update notes
+// ---------------------------------------------------------------------------
+export async function updateNotes(
+  id: string,
+  notes: string
+): Promise<ActionResult> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .update({ notes: notes || null })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("[updateNotes]", error.message);
+    return { ok: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/inventory");
+  return { ok: true, item: data as InventoryItem };
+}
+
+// ---------------------------------------------------------------------------
 // Delete
 // ---------------------------------------------------------------------------
 export async function deleteItem(id: string): Promise<ActionResult> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { error } = await supabase.from("inventory_items").delete().eq("id", id);
 
   if (error) {

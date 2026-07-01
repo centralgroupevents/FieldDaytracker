@@ -1,5 +1,8 @@
 import AddItemForm from "@/components/AddItemForm";
 
+// Not prerendered — the form builds a Supabase browser client at render time.
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Add Item · Field Day Tracker",
 };
