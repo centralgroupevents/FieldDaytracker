@@ -62,11 +62,13 @@ async function runStatusSideEffects(
 export async function createItem(input: {
   item_name: string;
   image_url?: string | null;
+  receipt_url?: string | null;
   unit_price: number;
   target_quantity: number;
   current_stock: number;
   carrier?: string | null;
   tracking_number?: string | null;
+  tracking_url?: string | null;
 }): Promise<ActionResult> {
   const supabase = await createClient();
 
@@ -86,11 +88,13 @@ export async function createItem(input: {
     .insert({
       item_name: name,
       image_url: input.image_url || null,
+      receipt_url: input.receipt_url || null,
       unit_price,
       target_quantity,
       current_stock,
       carrier: input.carrier || null,
       tracking_number: input.tracking_number || null,
+      tracking_url: input.tracking_url || null,
       status,
     })
     .select("*")

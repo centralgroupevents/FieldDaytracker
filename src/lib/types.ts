@@ -20,10 +20,40 @@ export interface InventoryItem {
   status: InventoryStatus;
   tracking_number: string | null;
   carrier: string | null;
+  /** Optional custom tracking link; overrides the auto-built carrier URL. */
+  tracking_url: string | null;
+  /** Separate receipt photo (item photo lives in image_url). */
+  receipt_url: string | null;
   /** Generated in Postgres: unit_price * current_stock */
   total_cost: number;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Builds a carrier tracking URL from carrier + tracking number.
+ * Falls back to a universal tracker for unknown carriers.
+ */
+export function trackingLink(
+  carrier: string | null,
+  trackingNumber: string | null,
+  customUrl?: string | null
+): string | null {
+  if (customUrl) return customUrl;
+  if (!trackingNumber) return null;
+  const t = encodeURIComponent(trackingNumber);
+  switch ((carrier || "").toUpperCase()) {
+    case "UPS":
+      return `https://www.ups.com/track?tracknum=${t}`;
+    case "FEDEX":
+      return `https://www.fedex.com/fedextrack/?trknbr=${t}`;
+    case "USPS":
+      return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${t}`;
+    case "DHL":
+      return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${t}`;
+    default:
+      return `https://parcelsapp.com/en/tracking/${t}`;
+  }
 }
 
 /** Tailwind classes for each status badge. */

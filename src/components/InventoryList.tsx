@@ -1,8 +1,31 @@
 import Image from "next/image";
-import { Package } from "lucide-react";
-import type { InventoryItem } from "@/lib/types";
+import { ExternalLink, Package } from "lucide-react";
+import { trackingLink, type InventoryItem } from "@/lib/types";
 import StatusBadge from "./StatusBadge";
 import QuickEdit from "./QuickEdit";
+
+/** Carrier + clickable tracking link (or a plain dash when none). */
+function CarrierCell({ item }: { item: InventoryItem }) {
+  const href = trackingLink(item.carrier, item.tracking_number, item.tracking_url);
+  const carrier = item.carrier ?? "—";
+  if (!href) return <span className="text-xs text-gray-400">{carrier}</span>;
+  return (
+    <span className="text-xs text-gray-400">
+      {carrier}
+      {item.tracking_number ? " · " : ""}
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex items-center gap-0.5 text-brand hover:underline"
+      >
+        {item.tracking_number ?? "Track"}
+        <ExternalLink className="h-3 w-3" />
+      </a>
+    </span>
+  );
+}
 
 function money(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -60,10 +83,7 @@ export default function InventoryList({ items }: { items: InventoryItem[] }) {
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between">
-              <span className="text-xs text-gray-400">
-                {item.carrier ?? "—"}
-                {item.tracking_number ? ` · ${item.tracking_number}` : ""}
-              </span>
+              <CarrierCell item={item} />
               <QuickEdit id={item.id} stock={item.current_stock} />
             </div>
           </li>
@@ -92,12 +112,7 @@ export default function InventoryList({ items }: { items: InventoryItem[] }) {
                     <Thumb url={item.image_url} name={item.item_name} small />
                     <div>
                       <p className="font-medium">{item.item_name}</p>
-                      <p className="text-xs text-gray-400">
-                        {item.carrier ?? "—"}
-                        {item.tracking_number
-                          ? ` · ${item.tracking_number}`
-                          : ""}
-                      </p>
+                      <CarrierCell item={item} />
                     </div>
                   </div>
                 </td>

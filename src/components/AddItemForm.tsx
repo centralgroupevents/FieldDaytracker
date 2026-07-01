@@ -2,134 +2,373 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Loader2, X } from "lucide-react";
+import {
+  Camera,
+  Link as LinkIcon,
+  Loader2,
+  Receipt,
+  Sparkles,
+  Truck,
+  X,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { createItem } from "@/app/actions/inventory";
 
 const CARRIERS = ["", "UPS", "FedEx", "USPS", "DHL", "Amazon"] as const;
 
+type FormState = {
+  item_name: string;
+  unit_price: string;
+  target_quantity: string;
+  current_stock: string;
+  carrier: string;
+  tracking_number: string;
+  tracking_url: string;
+};
+
+const EMPTY: FormState = {
+  item_name: "",
+  unit_price: "0",
+  target_quantity: "0",
+  current_stock: "0",
+  carrier: "",
+  tracking_number: "",
+  tracking_url: "",
+};
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function AddItemForm() {
   const router = useRouter();
   const supabase = createClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [preview, setPreview] = useState<string | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [form, setForm] = useState<FormState>(EMPTY);
+  const setField = (k: keyof FormState, v: string) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  // Two photos: item + receipt.
+  const [itemFile, setItemFile] = useState<File | null>(null);
+  const [itemPreview, setItemPreview] = useState<string | null>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+
+  // AI panel
+  const scanInputRef = useRef<HTMLInputElement>(null);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [trackingInput, setTrackingInput] = useState("");
+  const [aiBusy, setAiBusy] = useState<null | "receipt" | "link" | "tracking">(
+    null
+  );
+  const [aiNote, setAiNote] = useState<string | null>(null);
+
   const [uploading, setUploading] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function pickItemPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null;
-    setFile(f);
-    setPreview(f ? URL.createObjectURL(f) : null);
+    setItemFile(f);
+    setItemPreview(f ? URL.createObjectURL(f) : null);
+  }
+  function pickReceiptPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    setReceiptFile(f);
+    setReceiptPreview(f ? URL.createObjectURL(f) : null);
   }
 
-  function clearFile() {
-    setFile(null);
-    setPreview(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
-
-  /** Uploads the chosen photo to Supabase Storage and returns its public URL. */
-  async function uploadImage(): Promise<string | null> {
-    if (!file) return null;
-    setUploading(true);
+  // ---- AI: scan a receipt photo -> fill fields (and keep it as receipt photo)
+  async function scanReceipt(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setAiBusy("receipt");
+    setAiNote(null);
+    setError(null);
     try {
-      const ext = file.name.split(".").pop() || "jpg";
-      // Avoid Math.random()/Date.now collisions deterministically enough here.
-      const path = `${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from("item-images")
-        .upload(path, file, { cacheControl: "3600", upsert: false });
-      if (upErr) throw upErr;
+      // Also store the scanned image as the receipt photo.
+      setReceiptFile(f);
+      setReceiptPreview(URL.createObjectURL(f));
 
-      const { data } = supabase.storage.from("item-images").getPublicUrl(path);
-      return data.publicUrl;
+      const base64 = await fileToBase64(f);
+      const res = await fetch("/api/ai/parse-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64, mimeType: f.type }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Scan failed");
+
+      const items: any[] = Array.isArray(data.items) ? data.items : [];
+      if (items.length === 0) {
+        setAiNote("No line items found — please enter the details manually.");
+        return;
+      }
+      const first = items[0];
+      setForm((prev) => ({
+        ...prev,
+        item_name: first.item_name ?? prev.item_name,
+        unit_price:
+          first.unit_price != null ? String(first.unit_price) : prev.unit_price,
+        current_stock:
+          first.quantity != null ? String(first.quantity) : prev.current_stock,
+        carrier: data.carrier ?? prev.carrier,
+        tracking_number: data.tracking_number ?? prev.tracking_number,
+      }));
+      if (items.length > 1) {
+        setAiNote(
+          `Filled the first item. ${items.length - 1} more on the receipt: ${items
+            .slice(1)
+            .map((i) => i.item_name)
+            .filter(Boolean)
+            .join(", ")} — add them separately.`
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Receipt scan failed.");
     } finally {
-      setUploading(false);
+      setAiBusy(null);
+      if (scanInputRef.current) scanInputRef.current.value = "";
     }
   }
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  // ---- AI: product link -> name + price
+  async function fetchFromLink() {
+    if (!linkUrl.trim()) return;
+    setAiBusy("link");
+    setAiNote(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/ai/parse-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: linkUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fetch failed");
+      if (data.note) setAiNote(data.note);
+      setForm((prev) => ({
+        ...prev,
+        item_name: data.item_name ?? prev.item_name,
+        unit_price:
+          data.unit_price != null ? String(data.unit_price) : prev.unit_price,
+      }));
+      if (!data.item_name && !data.note) {
+        setAiNote("Couldn't read that page — enter the details manually.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Link fetch failed.");
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  // ---- AI: tracking number -> carrier
+  async function detectTracking() {
+    if (!trackingInput.trim()) return;
+    setAiBusy("tracking");
+    setAiNote(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/ai/parse-tracking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trackingNumber: trackingInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Detect failed");
+      if (data.note) setAiNote(data.note);
+      setForm((prev) => ({
+        ...prev,
+        tracking_number: data.tracking_number ?? trackingInput.trim(),
+        carrier: data.carrier ?? prev.carrier,
+      }));
+      if (!data.carrier && !data.note) {
+        setAiNote("Carrier not recognized — pick it manually.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Tracking detect failed.");
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function uploadPhoto(file: File): Promise<string> {
+    const ext = file.name.split(".").pop() || "jpg";
+    const path = `${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("item-images")
+      .upload(path, file, { cacheControl: "3600", upsert: false });
+    if (upErr) throw upErr;
+    return supabase.storage.from("item-images").getPublicUrl(path).data.publicUrl;
+  }
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const form = e.currentTarget;
-    const fd = new FormData(form);
-
+    if (!form.item_name.trim()) {
+      setError("Item name is required.");
+      return;
+    }
     startTransition(async () => {
       try {
-        const image_url = await uploadImage();
+        setUploading(true);
+        const image_url = itemFile ? await uploadPhoto(itemFile) : null;
+        const receipt_url = receiptFile ? await uploadPhoto(receiptFile) : null;
+        setUploading(false);
 
         const res = await createItem({
-          item_name: String(fd.get("item_name") || ""),
+          item_name: form.item_name,
           image_url,
-          unit_price: Number(fd.get("unit_price") || 0),
-          target_quantity: Number(fd.get("target_quantity") || 0),
-          current_stock: Number(fd.get("current_stock") || 0),
-          carrier: (fd.get("carrier") as string) || null,
-          tracking_number: (fd.get("tracking_number") as string) || null,
+          receipt_url,
+          unit_price: Number(form.unit_price || 0),
+          target_quantity: Number(form.target_quantity || 0),
+          current_stock: Number(form.current_stock || 0),
+          carrier: form.carrier || null,
+          tracking_number: form.tracking_number || null,
+          tracking_url: form.tracking_url || null,
         });
-
         if (!res.ok) {
           setError(res.error ?? "Failed to create item.");
           return;
         }
-        form.reset();
-        clearFile();
+        setForm(EMPTY);
         router.push("/inventory");
         router.refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Upload failed.");
+        setUploading(false);
+        setError(err instanceof Error ? err.message : "Something went wrong.");
       }
     });
   }
 
-  const busy = pending || uploading;
+  const busy = pending || uploading || aiBusy !== null;
 
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      {/* Photo */}
-      <div>
-        <label className="mb-1.5 block text-sm font-medium text-gray-700">
-          Photo
-        </label>
-        {preview ? (
-          <div className="relative inline-block">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={preview}
-              alt="Preview"
-              className="h-40 w-40 rounded-xl object-cover ring-1 ring-gray-200"
-            />
+      {/* ---- AI auto-fill panel ---- */}
+      <div className="rounded-2xl border border-brand/30 bg-brand/5 p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-brand">
+          <Sparkles className="h-4 w-4" />
+          Auto-fill with AI
+        </div>
+
+        <div className="grid gap-3">
+          {/* Scan receipt */}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => scanInputRef.current?.click()}
+            className="flex items-center justify-center gap-2 rounded-xl border border-brand bg-white px-3 py-2.5 text-sm font-medium text-brand hover:bg-brand/10 disabled:opacity-60"
+          >
+            {aiBusy === "receipt" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Receipt className="h-4 w-4" />
+            )}
+            Scan a receipt photo
+          </button>
+          <input
+            ref={scanInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={scanReceipt}
+            className="hidden"
+          />
+
+          {/* From link */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="Paste a product link"
+                className="w-full rounded-xl border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-brand"
+              />
+            </div>
             <button
               type="button"
-              onClick={clearFile}
-              className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full bg-gray-900 text-white shadow"
-              aria-label="Remove photo"
+              disabled={busy || !linkUrl.trim()}
+              onClick={fetchFromLink}
+              className="rounded-xl bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              <X className="h-4 w-4" />
+              {aiBusy === "link" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Fetch"
+              )}
             </button>
           </div>
-        ) : (
-          <label className="flex h-40 w-40 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-white text-gray-500 hover:border-brand hover:text-brand">
-            <Camera className="h-7 w-7" />
-            <span className="text-xs font-medium">Snap / upload</span>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={onPickFile}
-              className="hidden"
-            />
-          </label>
+
+          {/* From tracking */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Truck className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                value={trackingInput}
+                onChange={(e) => setTrackingInput(e.target.value)}
+                placeholder="Paste a tracking number"
+                className="w-full rounded-xl border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-brand"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={busy || !trackingInput.trim()}
+              onClick={detectTracking}
+              className="rounded-xl bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {aiBusy === "tracking" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Detect"
+              )}
+            </button>
+          </div>
+        </div>
+
+        {aiNote && (
+          <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
+            {aiNote}
+          </p>
         )}
       </div>
 
+      {/* ---- Photos ---- */}
+      <div className="grid grid-cols-2 gap-4">
+        <PhotoSlot
+          label="Item photo"
+          preview={itemPreview}
+          onPick={pickItemPhoto}
+          onClear={() => {
+            setItemFile(null);
+            setItemPreview(null);
+          }}
+          icon={<Camera className="h-6 w-6" />}
+        />
+        <PhotoSlot
+          label="Receipt photo"
+          preview={receiptPreview}
+          onPick={pickReceiptPhoto}
+          onClear={() => {
+            setReceiptFile(null);
+            setReceiptPreview(null);
+          }}
+          icon={<Receipt className="h-6 w-6" />}
+        />
+      </div>
+
+      {/* ---- Fields ---- */}
       <Field label="Item name" required>
         <input
-          name="item_name"
+          value={form.item_name}
+          onChange={(e) => setField("item_name", e.target.value)}
           required
           placeholder="e.g. Folding canopy tent"
           className={inputClass}
@@ -139,21 +378,21 @@ export default function AddItemForm() {
       <div className="grid grid-cols-2 gap-4">
         <Field label="Unit price ($)">
           <input
-            name="unit_price"
             type="number"
             min="0"
             step="0.01"
-            defaultValue="0"
+            value={form.unit_price}
+            onChange={(e) => setField("unit_price", e.target.value)}
             className={inputClass}
           />
         </Field>
         <Field label="Target quantity">
           <input
-            name="target_quantity"
             type="number"
             min="0"
             step="1"
-            defaultValue="0"
+            value={form.target_quantity}
+            onChange={(e) => setField("target_quantity", e.target.value)}
             className={inputClass}
           />
         </Field>
@@ -162,16 +401,20 @@ export default function AddItemForm() {
       <div className="grid grid-cols-2 gap-4">
         <Field label="Current stock">
           <input
-            name="current_stock"
             type="number"
             min="0"
             step="1"
-            defaultValue="0"
+            value={form.current_stock}
+            onChange={(e) => setField("current_stock", e.target.value)}
             className={inputClass}
           />
         </Field>
         <Field label="Carrier">
-          <select name="carrier" defaultValue="" className={inputClass}>
+          <select
+            value={form.carrier}
+            onChange={(e) => setField("carrier", e.target.value)}
+            className={inputClass}
+          >
             {CARRIERS.map((c) => (
               <option key={c} value={c}>
                 {c || "—"}
@@ -183,7 +426,8 @@ export default function AddItemForm() {
 
       <Field label="Tracking number">
         <input
-          name="tracking_number"
+          value={form.tracking_number}
+          onChange={(e) => setField("tracking_number", e.target.value)}
           placeholder="Optional"
           className={inputClass}
         />
@@ -200,8 +444,8 @@ export default function AddItemForm() {
         disabled={busy}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-brand-dark disabled:opacity-60"
       >
-        {busy && <Loader2 className="h-5 w-5 animate-spin" />}
-        {uploading ? "Uploading photo…" : pending ? "Saving…" : "Add Item"}
+        {(pending || uploading) && <Loader2 className="h-5 w-5 animate-spin" />}
+        {uploading ? "Uploading photos…" : pending ? "Saving…" : "Add Item"}
       </button>
     </form>
   );
@@ -227,5 +471,57 @@ function Field({
       </span>
       {children}
     </label>
+  );
+}
+
+function PhotoSlot({
+  label,
+  preview,
+  onPick,
+  onClear,
+  icon,
+}: {
+  label: string;
+  preview: string | null;
+  onPick: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onClear: () => void;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div>
+      <span className="mb-1.5 block text-sm font-medium text-gray-700">
+        {label}
+      </span>
+      {preview ? (
+        <div className="relative inline-block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={preview}
+            alt={label}
+            className="h-32 w-full rounded-xl object-cover ring-1 ring-gray-200"
+          />
+          <button
+            type="button"
+            onClick={onClear}
+            className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full bg-gray-900 text-white shadow"
+            aria-label={`Remove ${label}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <label className="flex h-32 w-full cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-gray-300 bg-white text-gray-500 hover:border-brand hover:text-brand">
+          {icon}
+          <span className="text-xs font-medium">Snap / upload</span>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={onPick}
+            className="hidden"
+          />
+        </label>
+      )}
+    </div>
   );
 }
