@@ -1,9 +1,10 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Package, PlusCircle } from "lucide-react";
+import { LayoutDashboard, Package, Wallet, PlusCircle } from "lucide-react";
 
 const ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/inventory", label: "Inventory", icon: Package },
+  { href: "/expenses", label: "Expenses", icon: Wallet },
   { href: "/add", label: "Add Item", icon: PlusCircle },
 ] as const;
 

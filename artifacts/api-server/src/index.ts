@@ -31,25 +31,12 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, WS_OPTIONS);
 // Auth middleware — validates Supabase bearer token
 // ---------------------------------------------------------------------------
 async function requireAuth(
-  req: express.Request,
-  res: express.Response,
+  _req: express.Request,
+  _res: express.Response,
   next: express.NextFunction
 ): Promise<void> {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith("Bearer ")) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  const token = auth.slice(7);
-  const anonClient = createClient(supabaseUrl, supabaseAnonKey, WS_OPTIONS);
-  const {
-    data: { user },
-    error,
-  } = await anonClient.auth.getUser(token);
-  if (error || !user) {
-    res.status(401).json({ error: "Invalid token" });
-    return;
-  }
+  // App is fully open (no login). Auth enforcement intentionally removed;
+  // supabaseAnonKey is still referenced in the env-var check above.
   next();
 }
 
@@ -120,6 +107,7 @@ app.post("/api/inventory", requireAuth, async (req, res) => {
       carrier: input.carrier || null,
       tracking_number: input.tracking_number || null,
       tracking_url: input.tracking_url || null,
+      notes: input.notes || null,
       status,
     })
     .select("*")
@@ -363,6 +351,97 @@ app.post("/api/ai/parse-tracking", requireAuth, async (req, res) => {
     carrier,
     note: carrier ? undefined : "Carrier not recognized — pick it manually.",
   });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /api/inventory/:id/notes
+// ---------------------------------------------------------------------------
+app.patch("/api/inventory/:id/notes", requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const notes = (req.body.notes ?? "").toString();
+  const { data, error } = await supabaseAdmin
+    .from("inventory_items")
+    .update({ notes: notes || null })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json({ ok: true, item: data });
+});
+
+// ---------------------------------------------------------------------------
+// Expenses (non-inventory event costs)
+// ---------------------------------------------------------------------------
+app.get("/api/expenses", requireAuth, async (_req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from("expenses")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json(data);
+});
+
+app.post("/api/expenses", requireAuth, async (req, res) => {
+  const b = req.body;
+  const description = (b.description ?? "").trim();
+  if (!description) {
+    res.status(400).json({ error: "description is required" });
+    return;
+  }
+  const { data, error } = await supabaseAdmin
+    .from("expenses")
+    .insert({
+      description,
+      amount: Number(b.amount) || 0,
+      category: b.category || "Other",
+      paid: Boolean(b.paid),
+      notes: b.notes || null,
+    })
+    .select("*")
+    .single();
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.status(201).json({ ok: true, expense: data });
+});
+
+app.patch("/api/expenses/:id", requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const b = req.body;
+  const patch: Record<string, unknown> = {};
+  if (b.description !== undefined) patch.description = String(b.description);
+  if (b.amount !== undefined) patch.amount = Number(b.amount) || 0;
+  if (b.category !== undefined) patch.category = String(b.category);
+  if (b.paid !== undefined) patch.paid = Boolean(b.paid);
+  if (b.notes !== undefined) patch.notes = b.notes || null;
+  const { data, error } = await supabaseAdmin
+    .from("expenses")
+    .update(patch)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json({ ok: true, expense: data });
+});
+
+app.delete("/api/expenses/:id", requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabaseAdmin.from("expenses").delete().eq("id", id);
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------

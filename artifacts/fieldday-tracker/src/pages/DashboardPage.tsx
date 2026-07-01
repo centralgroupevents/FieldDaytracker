@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DollarSign, PackageX, Truck } from "lucide-react";
-import type { InventoryItem } from "../lib/types";
+import type { InventoryItem, Expense } from "../lib/types";
 import { apiFetch } from "../lib/api";
 import KpiCard from "../components/KpiCard";
 import InventoryList from "../components/InventoryList";
@@ -15,13 +15,19 @@ function money(n: number): string {
 
 export default function DashboardPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch("/api/inventory")
-      .then((r) => r.json())
-      .then((data) => setItems(Array.isArray(data) ? data : []))
+    Promise.all([
+      apiFetch("/api/inventory").then((r) => r.json()),
+      apiFetch("/api/expenses").then((r) => r.json()),
+    ])
+      .then(([inv, exp]) => {
+        setItems(Array.isArray(inv) ? inv : []);
+        setExpenses(Array.isArray(exp) ? exp : []);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
@@ -30,7 +36,9 @@ export default function DashboardPage() {
     setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
   }
 
-  const totalSpent = items.reduce((sum, i) => sum + Number(i.total_cost), 0);
+  const inventorySpent = items.reduce((sum, i) => sum + Number(i.total_cost), 0);
+  const expensesSpent = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const totalSpent = inventorySpent + expensesSpent;
   const itemsMissing = items.filter((i) => i.delta > 0).length;
   const inTransit = items.filter((i) => i.status === "Shipped").length;
 

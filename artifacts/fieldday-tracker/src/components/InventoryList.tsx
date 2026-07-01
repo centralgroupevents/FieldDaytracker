@@ -99,6 +99,11 @@ export default function InventoryList({
                     </span>
                   )}
                 </p>
+                {item.notes && (
+                  <p className="mt-1 line-clamp-2 text-xs italic text-gray-400">
+                    {item.notes}
+                  </p>
+                )}
               </div>
             </div>
             <div className="mt-3 flex items-end justify-between gap-2">
@@ -154,6 +159,11 @@ export default function InventoryList({
                         {item.item_name}
                       </p>
                       <CarrierCell item={item} />
+                      {item.notes && (
+                        <p className="mt-0.5 max-w-[260px] truncate text-xs italic text-gray-400">
+                          {item.notes}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </td>

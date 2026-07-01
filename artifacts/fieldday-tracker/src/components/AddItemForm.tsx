@@ -22,6 +22,7 @@ type FormState = {
   carrier: string;
   tracking_number: string;
   tracking_url: string;
+  notes: string;
 };
 
 const EMPTY: FormState = {
@@ -32,6 +33,7 @@ const EMPTY: FormState = {
   carrier: "",
   tracking_number: "",
   tracking_url: "",
+  notes: "",
 };
 
 /** An item waiting in the multi-item receipt queue. */
@@ -310,6 +312,7 @@ export default function AddItemForm() {
           carrier: form.carrier || null,
           tracking_number: form.tracking_number || null,
           tracking_url: form.tracking_url || null,
+          notes: form.notes || null,
         }),
       });
       const data = await res.json();
@@ -543,6 +546,16 @@ export default function AddItemForm() {
           value={form.tracking_number}
           onChange={(e) => setField("tracking_number", e.target.value)}
           placeholder="Optional"
+          className={inputClass}
+        />
+      </Field>
+
+      <Field label="Notes">
+        <textarea
+          value={form.notes}
+          onChange={(e) => setField("notes", e.target.value)}
+          placeholder="Any extra details…"
+          rows={3}
           className={inputClass}
         />
       </Field>
