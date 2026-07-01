@@ -87,7 +87,7 @@ export default function InventoryList({
               <Thumb url={item.image_url} name={item.item_name} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="truncate font-semibold">{item.item_name}</p>
+                  <p className="line-clamp-2 font-semibold">{item.item_name}</p>
                   <StatusBadge status={item.status} />
                 </div>
                 <p className="mt-0.5 text-xs text-gray-500">
@@ -113,7 +113,7 @@ export default function InventoryList({
       </ul>
 
       {/* Desktop: table */}
-      <div className="hidden overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm md:block">
+      <div className="hidden overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm md:block">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
             <tr>
@@ -132,8 +132,13 @@ export default function InventoryList({
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <Thumb url={item.image_url} name={item.item_name} small />
-                    <div>
-                      <p className="font-medium">{item.item_name}</p>
+                    <div className="min-w-0">
+                      <p
+                        className="line-clamp-2 max-w-[260px] font-medium"
+                        title={item.item_name}
+                      >
+                        {item.item_name}
+                      </p>
                       <CarrierCell item={item} />
                     </div>
                   </div>
