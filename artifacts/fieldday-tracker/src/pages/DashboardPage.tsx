@@ -64,6 +64,7 @@ export default function DashboardPage() {
           value={money(totalSpent)}
           icon={DollarSign}
           accent="text-emerald-600"
+          sub={`Items ${money(inventorySpent)} · Expenses ${money(expensesSpent)}`}
         />
         <KpiCard
           label="Items Missing"
