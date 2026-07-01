@@ -402,6 +402,7 @@ app.post("/api/expenses", requireAuth, async (req, res) => {
       category: b.category || "Other",
       paid: Boolean(b.paid),
       notes: b.notes || null,
+      receipt_url: b.receipt_url || null,
     })
     .select("*")
     .single();
@@ -421,6 +422,7 @@ app.patch("/api/expenses/:id", requireAuth, async (req, res) => {
   if (b.category !== undefined) patch.category = String(b.category);
   if (b.paid !== undefined) patch.paid = Boolean(b.paid);
   if (b.notes !== undefined) patch.notes = b.notes || null;
+  if (b.receipt_url !== undefined) patch.receipt_url = b.receipt_url || null;
   const { data, error } = await supabaseAdmin
     .from("expenses")
     .update(patch)

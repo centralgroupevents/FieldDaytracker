@@ -45,6 +45,7 @@ export interface Expense {
   category: string;
   paid: boolean;
   notes: string | null;
+  receipt_url: string | null;
   created_at: string;
   updated_at: string;
 }

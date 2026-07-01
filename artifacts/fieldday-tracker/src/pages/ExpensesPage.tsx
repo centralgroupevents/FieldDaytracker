@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Loader2, Plus, Trash2, Check } from "lucide-react";
+import { Loader2, Plus, Trash2, Check, Camera, X } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import { supabase } from "../lib/supabase";
 import { EXPENSE_CATEGORIES, type Expense } from "../lib/types";
 
 function money(n: number): string {
@@ -31,7 +32,19 @@ export default function ExpensesPage() {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState<string>("Permit");
   const [notes, setNotes] = useState("");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  async function uploadPhoto(file: File): Promise<string> {
+    const ext = file.name.split(".").pop() || "jpg";
+    const path = `expense-${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("item-images")
+      .upload(path, file, { cacheControl: "3600", upsert: false });
+    if (upErr) throw upErr;
+    return supabase.storage.from("item-images").getPublicUrl(path).data.publicUrl;
+  }
 
   useEffect(() => {
     apiFetch("/api/expenses")
@@ -52,6 +65,7 @@ export default function ExpensesPage() {
     setSaving(true);
     setError(null);
     try {
+      const receipt_url = receiptFile ? await uploadPhoto(receiptFile) : null;
       const res = await apiFetch("/api/expenses", {
         method: "POST",
         body: JSON.stringify({
@@ -59,6 +73,7 @@ export default function ExpensesPage() {
           amount: Number(amount) || 0,
           category,
           notes: notes || null,
+          receipt_url,
           paid: false,
         }),
       });
@@ -69,6 +84,8 @@ export default function ExpensesPage() {
       setAmount("");
       setNotes("");
       setCategory("Permit");
+      setReceiptFile(null);
+      setReceiptPreview(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add expense");
     } finally {
@@ -151,6 +168,47 @@ export default function ExpensesPage() {
           rows={2}
           className={inputClass}
         />
+        <div>
+          <span className="mb-1.5 block text-xs font-medium text-gray-600">
+            Receipt photo (optional)
+          </span>
+          {receiptPreview ? (
+            <div className="relative inline-block">
+              <img
+                src={receiptPreview}
+                alt="Receipt"
+                className="h-24 w-24 rounded-xl object-cover ring-1 ring-gray-200"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setReceiptFile(null);
+                  setReceiptPreview(null);
+                }}
+                className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-gray-900 text-white"
+                aria-label="Remove receipt"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 hover:border-blue-600 hover:text-blue-600">
+              <Camera className="h-5 w-5" />
+              <span className="text-[10px] font-medium">Snap / upload</span>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  setReceiptFile(f);
+                  setReceiptPreview(f ? URL.createObjectURL(f) : null);
+                }}
+                className="hidden"
+              />
+            </label>
+          )}
+        </div>
         <button
           type="submit"
           disabled={saving || !description.trim()}
@@ -209,6 +267,20 @@ export default function ExpensesPage() {
                   </div>
                   {exp.notes && (
                     <p className="mt-1 text-xs italic text-gray-400">{exp.notes}</p>
+                  )}
+                  {exp.receipt_url && (
+                    <a
+                      href={exp.receipt_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-block"
+                    >
+                      <img
+                        src={exp.receipt_url}
+                        alt="Receipt"
+                        className="h-14 w-14 rounded-lg object-cover ring-1 ring-gray-200 hover:ring-blue-400"
+                      />
+                    </a>
                   )}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
