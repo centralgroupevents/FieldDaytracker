@@ -6,9 +6,20 @@ run = "npm run dev -- -H 0.0.0.0 -p 3000"
 [env]
 NEXT_TELEMETRY_DISABLED = "1"
 
-# Map the Next.js port to the public Replit URL.
 [[ports]]
 localPort = 3000
+externalPort = 3000
+
+[[ports]]
+localPort = 3001
+externalPort = 3001
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 18915
 externalPort = 80
 
 # Production deployment (Replit "Deploy" button -> Autoscale).
@@ -16,3 +27,46 @@ externalPort = 80
 deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
 run = ["npm", "run", "start", "--", "-H", "0.0.0.0"]
+
+[agent]
+expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "API Server"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Field Day Tracker"
+
+[[workflows.workflow]]
+name = "API Server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "Field Day Tracker"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=18915 BASE_PATH=/ pnpm --filter @workspace/fieldday-tracker run dev"
+waitForPort = 18915

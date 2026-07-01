@@ -1,0 +1,57 @@
+export const INVENTORY_STATUSES = [
+  "Needed",
+  "Pending Order",
+  "Shipped",
+  "Delivered",
+  "Picked Up",
+] as const;
+
+export type InventoryStatus = (typeof INVENTORY_STATUSES)[number];
+
+export interface InventoryItem {
+  id: string;
+  item_name: string;
+  image_url: string | null;
+  unit_price: number;
+  target_quantity: number;
+  current_stock: number;
+  delta: number;
+  status: InventoryStatus;
+  tracking_number: string | null;
+  carrier: string | null;
+  tracking_url: string | null;
+  receipt_url: string | null;
+  total_cost: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function trackingLink(
+  carrier: string | null,
+  trackingNumber: string | null,
+  customUrl?: string | null
+): string | null {
+  if (customUrl) return customUrl;
+  if (!trackingNumber) return null;
+  const t = encodeURIComponent(trackingNumber);
+  switch ((carrier || "").toUpperCase()) {
+    case "UPS":
+      return `https://www.ups.com/track?tracknum=${t}`;
+    case "FEDEX":
+      return `https://www.fedex.com/fedextrack/?trknbr=${t}`;
+    case "USPS":
+      return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${t}`;
+    case "DHL":
+      return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${t}`;
+    default:
+      return `https://parcelsapp.com/en/tracking/${t}`;
+  }
+}
+
+export const STATUS_STYLES: Record<InventoryStatus, string> = {
+  Needed: "bg-red-100 text-red-700 ring-red-600/20",
+  "Pending Order": "bg-amber-100 text-amber-700 ring-amber-600/20",
+  Shipped: "bg-blue-100 text-blue-700 ring-blue-600/20",
+  Delivered: "bg-emerald-100 text-emerald-700 ring-emerald-600/20",
+  "Picked Up": "bg-violet-100 text-violet-700 ring-violet-600/20",
+};
