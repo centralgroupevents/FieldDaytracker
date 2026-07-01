@@ -1,21 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { detectCarrier } from "@/lib/carrier";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SLUG_TO_CARRIER: Record<string, string> = {
-  ups: "UPS",
-  fedex: "FedEx",
-  usps: "USPS",
-  "dhl": "DHL",
-  "dhl-global-mail": "DHL",
-  "amazon": "Amazon",
-};
-
 /**
- * Detects the carrier for a tracking number via AfterShip's courier-detect
- * endpoint, so the Add Item form can auto-fill the carrier.
+ * Detects the carrier for a tracking number from its FORMAT — free, offline,
+ * no third-party API. The user can override the carrier in the form.
  * Body: { trackingNumber: string }
  */
 export async function POST(req: NextRequest) {
@@ -40,34 +32,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const apiKey = process.env.AFTERSHIP_API_KEY;
-  if (!apiKey) {
-    // No key: still return the number so the user can fill the carrier manually.
-    return NextResponse.json({
-      tracking_number: trackingNumber,
-      carrier: null,
-      note: "AFTERSHIP_API_KEY not set — enter the carrier manually.",
-    });
-  }
-
-  try {
-    const r = await fetch("https://api.aftership.com/v4/couriers/detect", {
-      method: "POST",
-      headers: {
-        "aftership-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ tracking: { tracking_number: trackingNumber } }),
-      signal: AbortSignal.timeout(12000),
-    });
-    const data = await r.json();
-    const first = data?.data?.couriers?.[0];
-    const carrier = first
-      ? SLUG_TO_CARRIER[first.slug] || first.name || null
-      : null;
-    return NextResponse.json({ tracking_number: trackingNumber, carrier });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Detect error";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  const carrier = detectCarrier(trackingNumber);
+  return NextResponse.json({
+    tracking_number: trackingNumber,
+    carrier,
+    note: carrier
+      ? undefined
+      : "Couldn't tell the carrier from the number — pick it manually.",
+  });
 }
