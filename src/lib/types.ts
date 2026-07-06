@@ -88,3 +88,70 @@ export const STATUS_STYLES: Record<InventoryStatus, string> = {
   Delivered: "bg-emerald-100 text-emerald-700 ring-emerald-600/20",
   "Picked Up": "bg-violet-100 text-violet-700 ring-violet-600/20",
 };
+
+// ============================================================================
+// OUTREACH TAB
+// ============================================================================
+
+export const OUTREACH_STAGES = [
+  "New",
+  "Contacted",
+  "Replied",
+  "Confirmed",
+  "Closed",
+] as const;
+
+export type OutreachStage = (typeof OUTREACH_STAGES)[number];
+
+/** Tailwind classes for each stage badge (mirrors STATUS_STYLES above). */
+export const STAGE_STYLES: Record<string, string> = {
+  New: "bg-gray-100 text-gray-700 ring-gray-600/20",
+  Contacted: "bg-blue-100 text-blue-700 ring-blue-600/20",
+  Replied: "bg-amber-100 text-amber-700 ring-amber-600/20",
+  Confirmed: "bg-emerald-100 text-emerald-700 ring-emerald-600/20",
+  Closed: "bg-violet-100 text-violet-700 ring-violet-600/20",
+};
+
+export interface OutreachContact {
+  id: string;
+  name: string;
+  email: string;
+  company: string | null;
+  stage: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OutreachTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OutreachSend {
+  id: string;
+  contact_id: string | null;
+  template_id: string | null;
+  to_email: string;
+  subject: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+}
+
+/**
+ * Fills {{name}}, {{email}}, {{company}} (any {{key}}) from the given vars.
+ * Unknown placeholders resolve to an empty string.
+ */
+export function renderTemplate(
+  text: string,
+  vars: Record<string, string>
+): string {
+  return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key: string) =>
+    vars[key] !== undefined ? vars[key] : ""
+  );
+}
