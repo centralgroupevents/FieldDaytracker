@@ -143,6 +143,11 @@ export interface OutreachSend {
   created_at: string;
 }
 
+/** A send row joined with the contact's name, for the Activity log. */
+export interface SendLogRow extends OutreachSend {
+  contact: { name: string } | null;
+}
+
 /**
  * Fills {{name}}, {{email}}, {{company}} (any {{key}}) from the given vars.
  * Unknown placeholders resolve to an empty string.
