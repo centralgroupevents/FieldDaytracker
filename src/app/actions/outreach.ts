@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail } from "@/lib/mailer";
-import type { OutreachContact, OutreachTemplate } from "@/lib/types";
+import {
+  renderTemplate,
+  type OutreachContact,
+  type OutreachTemplate,
+} from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Contacts
@@ -230,4 +234,94 @@ export async function sendEmail(input: {
         "Email not configured yet — add GMAIL_USER and GMAIL_APP_PASSWORD in Secrets.",
     };
   return { ok: result.ok, error: result.error };
+}
+
+/**
+ * Sends the same template to every contact currently in `stage`. The subject/
+ * body arrive WITH {{placeholders}} intact and are rendered per contact here,
+ * so each person gets their own name/company filled in. Each send is logged;
+ * successfully-sent contacts optionally advance to `advanceStage`.
+ */
+export async function sendBatch(input: {
+  stage: string;
+  subjectTemplate: string;
+  bodyTemplate: string;
+  templateId?: string | null;
+  advanceStage?: string | null;
+}): Promise<{
+  ok: boolean;
+  sent: number;
+  failed: number;
+  skipped: number;
+  error?: string;
+}> {
+  const supabase = createAdminClient();
+
+  const { data: contacts, error } = await supabase
+    .from("outreach_contacts")
+    .select("*")
+    .eq("stage", input.stage);
+
+  if (error)
+    return { ok: false, sent: 0, failed: 0, skipped: 0, error: error.message };
+  if (!contacts || contacts.length === 0)
+    return {
+      ok: false,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      error: "No contacts in this stage.",
+    };
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const contact of contacts as OutreachContact[]) {
+    const vars = {
+      name: contact.name,
+      email: contact.email,
+      company: contact.company || "",
+    };
+    const subject = renderTemplate(input.subjectTemplate, vars);
+    const body = renderTemplate(input.bodyTemplate, vars);
+
+    const result = await sendMail({ to: contact.email, subject, body });
+
+    await supabase.from("outreach_sends").insert({
+      contact_id: contact.id,
+      template_id: input.templateId || null,
+      to_email: contact.email,
+      subject,
+      status: result.ok ? "sent" : result.skipped ? "skipped" : "failed",
+      error: result.error || null,
+    });
+
+    if (result.ok) {
+      sent++;
+      if (input.advanceStage) {
+        await supabase
+          .from("outreach_contacts")
+          .update({ stage: input.advanceStage })
+          .eq("id", contact.id);
+      }
+    } else if (result.skipped) {
+      skipped++;
+    } else {
+      failed++;
+    }
+  }
+
+  revalidatePath("/outreach");
+
+  if (skipped > 0 && sent === 0 && failed === 0)
+    return {
+      ok: false,
+      sent,
+      failed,
+      skipped,
+      error:
+        "Email not configured yet — add GMAIL_USER and GMAIL_APP_PASSWORD in Secrets.",
+    };
+  return { ok: sent > 0, sent, failed, skipped };
 }

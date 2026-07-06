@@ -11,6 +11,11 @@ import {
   X,
   Upload,
   Send,
+  Activity as ActivityIcon,
+  Users2,
+  CheckCircle2,
+  XCircle,
+  MinusCircle,
 } from "lucide-react";
 import {
   OUTREACH_STAGES,
@@ -18,6 +23,7 @@ import {
   renderTemplate,
   type OutreachContact,
   type OutreachTemplate,
+  type SendLogRow,
 } from "@/lib/types";
 import {
   createContact,
@@ -27,22 +33,25 @@ import {
   saveTemplate,
   deleteTemplate,
   sendEmail,
+  sendBatch,
 } from "@/app/actions/outreach";
 
-type View = "pipeline" | "templates";
+type View = "pipeline" | "templates" | "activity";
 
 export default function OutreachClient({
   initialContacts,
   initialTemplates,
+  initialSends,
 }: {
   initialContacts: OutreachContact[];
   initialTemplates: OutreachTemplate[];
+  initialSends: SendLogRow[];
 }) {
   const [view, setView] = useState<View>("pipeline");
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <ViewTab
           active={view === "pipeline"}
           onClick={() => setView("pipeline")}
@@ -57,13 +66,20 @@ export default function OutreachClient({
           label="Templates"
           count={initialTemplates.length}
         />
+        <ViewTab
+          active={view === "activity"}
+          onClick={() => setView("activity")}
+          icon={<ActivityIcon className="h-4 w-4" />}
+          label="Activity"
+          count={initialSends.length}
+        />
       </div>
 
-      {view === "pipeline" ? (
+      {view === "pipeline" && (
         <Pipeline contacts={initialContacts} templates={initialTemplates} />
-      ) : (
-        <Templates templates={initialTemplates} />
       )}
+      {view === "templates" && <Templates templates={initialTemplates} />}
+      {view === "activity" && <ActivityLog sends={initialSends} />}
     </div>
   );
 }
@@ -117,6 +133,7 @@ function Pipeline({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [composeFor, setComposeFor] = useState<OutreachContact | null>(null);
+  const [batchStage, setBatchStage] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
 
@@ -173,9 +190,17 @@ function Pipeline({
         ({ stage, items }) =>
           items.length > 0 && (
             <div key={stage} className="space-y-2">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-                <StageBadge stage={stage} /> {items.length}
-              </h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                  <StageBadge stage={stage} /> {items.length}
+                </h3>
+                <button
+                  onClick={() => setBatchStage(stage)}
+                  className="flex items-center gap-1 rounded-md bg-brand/10 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/20"
+                >
+                  <Users2 className="h-3.5 w-3.5" /> Email all {items.length}
+                </button>
+              </div>
               <ul className="space-y-2">
                 {items.map((c) => (
                   <ContactCard
@@ -197,6 +222,19 @@ function Pipeline({
           onClose={() => setComposeFor(null)}
           onSent={() => {
             setComposeFor(null);
+            refresh();
+          }}
+        />
+      )}
+
+      {batchStage && (
+        <BatchComposeModal
+          stage={batchStage}
+          count={contacts.filter((c) => c.stage === batchStage).length}
+          templates={templates}
+          onClose={() => setBatchStage(null)}
+          onSent={() => {
+            setBatchStage(null);
             refresh();
           }}
         />
@@ -422,78 +460,229 @@ function ComposeModal({
   }
 
   return (
+    <ModalShell title={`Email ${contact.name}`} onClose={onClose}>
+      <p className="mb-3 text-sm text-gray-500">
+        To: <span className="font-medium text-gray-700">{contact.email}</span>
+      </p>
+
+      <TemplatePicker
+        templates={templates}
+        value={templateId}
+        onChange={applyTemplate}
+      />
+
+      <input
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        placeholder="Subject"
+        className="mb-2 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={8}
+        placeholder="Write your message… you can edit this before sending."
+        className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+
+      <AdvancePicker value={advance} onChange={setAdvance} />
+
+      {status && <p className="mb-2 text-sm text-red-600">{status}</p>}
+
+      <button
+        onClick={send}
+        disabled={sending || !subject.trim()}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 font-medium text-white disabled:opacity-50"
+      >
+        <Send className="h-4 w-4" />
+        {sending ? "Sending…" : "Send email"}
+      </button>
+    </ModalShell>
+  );
+}
+
+function BatchComposeModal({
+  stage,
+  count,
+  templates,
+  onClose,
+  onSent,
+}: {
+  stage: string;
+  count: number;
+  templates: OutreachTemplate[];
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  // Batch keeps {{placeholders}} literal — they're rendered per contact server-side.
+  const [templateId, setTemplateId] = useState<string>("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [advance, setAdvance] = useState<string>("Contacted");
+  const [status, setStatus] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+
+  function applyTemplate(id: string) {
+    setTemplateId(id);
+    const t = templates.find((x) => x.id === id);
+    if (t) {
+      setSubject(t.subject);
+      setBody(t.body);
+    }
+  }
+
+  async function send() {
+    if (
+      !confirm(
+        `Send this email to all ${count} contact(s) in "${stage}"?`
+      )
+    )
+      return;
+    setStatus(null);
+    setSending(true);
+    const res = await sendBatch({
+      stage,
+      subjectTemplate: subject,
+      bodyTemplate: body,
+      templateId: templateId || null,
+      advanceStage: advance || null,
+    });
+    setSending(false);
+    if (res.ok) {
+      const parts = [`${res.sent} sent`];
+      if (res.failed) parts.push(`${res.failed} failed`);
+      if (res.skipped) parts.push(`${res.skipped} skipped`);
+      alert(parts.join(", ") + ".");
+      onSent();
+    } else {
+      setStatus(res.error || "Batch send failed.");
+    }
+  }
+
+  return (
+    <ModalShell title={`Email all in "${stage}"`} onClose={onClose}>
+      <p className="mb-3 text-sm text-gray-500">
+        Sends to{" "}
+        <span className="font-medium text-gray-700">{count} contact(s)</span>.{" "}
+        <code>{"{{name}}"}</code> / <code>{"{{company}}"}</code> fill in per
+        person.
+      </p>
+
+      <TemplatePicker
+        templates={templates}
+        value={templateId}
+        onChange={applyTemplate}
+      />
+
+      <input
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        placeholder="Subject"
+        className="mb-2 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={8}
+        placeholder={"Hi {{name}},\n\n…"}
+        className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+
+      <AdvancePicker value={advance} onChange={setAdvance} />
+
+      {status && <p className="mb-2 text-sm text-red-600">{status}</p>}
+
+      <button
+        onClick={send}
+        disabled={sending || !subject.trim()}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 font-medium text-white disabled:opacity-50"
+      >
+        <Users2 className="h-4 w-4" />
+        {sending ? "Sending…" : `Send to ${count}`}
+      </button>
+    </ModalShell>
+  );
+}
+
+function ModalShell({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold text-gray-900">
-            Email {contact.name}
-          </h3>
+          <h3 className="font-semibold text-gray-900">{title}</h3>
           <button onClick={onClose} className="p-1 text-gray-400">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <p className="mb-3 text-sm text-gray-500">
-          To: <span className="font-medium text-gray-700">{contact.email}</span>
-        </p>
-
-        <label className="mb-1 block text-xs font-medium text-gray-500">
-          Start from a template
-        </label>
-        <select
-          value={templateId}
-          onChange={(e) => applyTemplate(e.target.value)}
-          className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-        >
-          <option value="">— blank —</option>
-          {templates.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-
-        <input
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          placeholder="Subject"
-          className="mb-2 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-        />
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={8}
-          placeholder="Write your message… you can edit this before sending."
-          className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-        />
-
-        <label className="mb-1 block text-xs font-medium text-gray-500">
-          After sending, move to
-        </label>
-        <select
-          value={advance}
-          onChange={(e) => setAdvance(e.target.value)}
-          className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-        >
-          <option value="">— don&apos;t change stage —</option>
-          {OUTREACH_STAGES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-
-        {status && <p className="mb-2 text-sm text-red-600">{status}</p>}
-
-        <button
-          onClick={send}
-          disabled={sending || !subject.trim()}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 font-medium text-white disabled:opacity-50"
-        >
-          <Send className="h-4 w-4" />
-          {sending ? "Sending…" : "Send email"}
-        </button>
+        {children}
       </div>
     </div>
+  );
+}
+
+function TemplatePicker({
+  templates,
+  value,
+  onChange,
+}: {
+  templates: OutreachTemplate[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <>
+      <label className="mb-1 block text-xs font-medium text-gray-500">
+        Start from a template
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      >
+        <option value="">— blank —</option>
+        {templates.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+    </>
+  );
+}
+
+function AdvancePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <>
+      <label className="mb-1 block text-xs font-medium text-gray-500">
+        After sending, move to
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      >
+        <option value="">— don&apos;t change stage —</option>
+        {OUTREACH_STAGES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
+    </>
   );
 }
 
@@ -649,4 +838,85 @@ function TemplateEditor({
       </div>
     </div>
   );
+}
+
+// ===========================================================================
+// ACTIVITY LOG
+// ===========================================================================
+
+function ActivityLog({ sends }: { sends: SendLogRow[] }) {
+  if (sends.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+        No emails sent yet. Sends will show up here with their status.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="space-y-2">
+      {sends.map((s) => (
+        <li
+          key={s.id}
+          className="rounded-lg border border-gray-200 bg-white p-3"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate font-medium text-gray-900">
+                {s.subject || "(no subject)"}
+              </p>
+              <p className="truncate text-sm text-gray-500">
+                {s.contact?.name ? `${s.contact.name} · ` : ""}
+                {s.to_email}
+              </p>
+              {s.error && (
+                <p className="mt-0.5 truncate text-xs text-red-600">
+                  {s.error}
+                </p>
+              )}
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <SendStatus status={s.status} />
+              <span className="text-xs text-gray-400">
+                {formatWhen(s.created_at)}
+              </span>
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SendStatus({ status }: { status: string }) {
+  if (status === "sent")
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
+        <CheckCircle2 className="h-3.5 w-3.5" /> Sent
+      </span>
+    );
+  if (status === "failed")
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600">
+        <XCircle className="h-3.5 w-3.5" /> Failed
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500">
+      <MinusCircle className="h-3.5 w-3.5" /> Skipped
+    </span>
+  );
+}
+
+function formatWhen(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
 }
