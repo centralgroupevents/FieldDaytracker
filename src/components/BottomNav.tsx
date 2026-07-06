@@ -2,12 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Package, Wallet, PlusCircle } from "lucide-react";
+import {
+  LayoutDashboard,
+  Package,
+  Wallet,
+  PlusCircle,
+  Send,
+} from "lucide-react";
 
 const ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/expenses", label: "Expenses", icon: Wallet },
+  { href: "/outreach", label: "Outreach", icon: Send },
   { href: "/add", label: "Add Item", icon: PlusCircle },
 ] as const;
 
