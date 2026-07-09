@@ -16,6 +16,11 @@ export async function sendMail(params: {
   subject: string;
   /** Plain text typed by the operator. Newlines become <br> in the HTML part. */
   body: string;
+  /** Comma-separated CC / BCC recipient list (optional). */
+  cc?: string | null;
+  bcc?: string | null;
+  /** Files to attach. `path` is a URL (nodemailer fetches it) or file path. */
+  attachments?: { filename: string; path: string }[];
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
   const user = process.env.GMAIL_USER;
   const pass = process.env.GMAIL_APP_PASSWORD;
@@ -28,7 +33,7 @@ export async function sendMail(params: {
     return { ok: false, skipped: true };
   }
 
-  const { to, subject, body } = params;
+  const { to, subject, body, cc, bcc, attachments } = params;
   if (!to.trim()) return { ok: false, error: "No recipient email." };
 
   const transporter = nodemailer.createTransport({
@@ -41,7 +46,16 @@ export async function sendMail(params: {
   )}</div>`;
 
   try {
-    await transporter.sendMail({ from, to, subject, text: body, html });
+    await transporter.sendMail({
+      from,
+      to,
+      cc: cc?.trim() || undefined,
+      bcc: bcc?.trim() || undefined,
+      subject,
+      text: body,
+      html,
+      attachments: attachments?.length ? attachments : undefined,
+    });
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown mail error";

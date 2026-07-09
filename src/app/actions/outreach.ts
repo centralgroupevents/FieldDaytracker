@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail } from "@/lib/mailer";
 import {
   renderTemplate,
+  type OutreachAttachment,
   type OutreachContact,
   type OutreachTemplate,
 } from "@/lib/types";
@@ -139,6 +140,9 @@ export async function saveTemplate(input: {
   name: string;
   subject: string;
   body: string;
+  cc?: string | null;
+  bcc?: string | null;
+  attachments?: OutreachAttachment[];
 }): Promise<TemplateResult> {
   const supabase = createAdminClient();
   const name = (input.name ?? "").trim();
@@ -148,6 +152,9 @@ export async function saveTemplate(input: {
     name,
     subject: input.subject ?? "",
     body: input.body ?? "",
+    cc: input.cc?.trim() || null,
+    bcc: input.bcc?.trim() || null,
+    attachments: input.attachments ?? [],
   };
 
   const query = input.id
@@ -158,6 +165,46 @@ export async function saveTemplate(input: {
   if (error) return { ok: false, error: error.message };
   revalidatePath("/outreach");
   return { ok: true, template: data as OutreachTemplate };
+}
+
+/**
+ * Uploads one file to the public `outreach-attachments` bucket and returns its
+ * public URL. Called from the client when a file is selected; the returned
+ * attachment is then saved onto a template or attached to a one-off send.
+ */
+export async function uploadAttachment(
+  formData: FormData
+): Promise<{ ok: boolean; error?: string; attachment?: OutreachAttachment }> {
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0)
+    return { ok: false, error: "No file provided." };
+
+  // Gmail caps attachments at 25 MB.
+  if (file.size > 25 * 1024 * 1024)
+    return { ok: false, error: "File is larger than 25 MB (Gmail's limit)." };
+
+  const supabase = createAdminClient();
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const dot = file.name.lastIndexOf(".");
+  const ext = dot > -1 ? file.name.slice(dot + 1).toLowerCase() : "bin";
+  const path = `${crypto.randomUUID()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from("outreach-attachments")
+    .upload(path, bytes, {
+      contentType: file.type || "application/octet-stream",
+      upsert: false,
+    });
+  if (error) return { ok: false, error: error.message };
+
+  const { data } = supabase.storage
+    .from("outreach-attachments")
+    .getPublicUrl(path);
+
+  return {
+    ok: true,
+    attachment: { filename: file.name, url: data.publicUrl, size: file.size },
+  };
 }
 
 export async function deleteTemplate(
@@ -189,6 +236,9 @@ export async function sendEmail(input: {
   body: string;
   templateId?: string | null;
   advanceStage?: string | null;
+  cc?: string | null;
+  bcc?: string | null;
+  attachments?: OutreachAttachment[];
 }): Promise<{ ok: boolean; error?: string; skipped?: boolean }> {
   const supabase = createAdminClient();
 
@@ -205,6 +255,12 @@ export async function sendEmail(input: {
     to: contact.email,
     subject: input.subject,
     body: input.body,
+    cc: input.cc,
+    bcc: input.bcc,
+    attachments: (input.attachments ?? []).map((a) => ({
+      filename: a.filename,
+      path: a.url,
+    })),
   });
 
   // Log every attempt, whatever the outcome.
@@ -213,6 +269,8 @@ export async function sendEmail(input: {
     template_id: input.templateId || null,
     to_email: contact.email,
     subject: input.subject,
+    cc: input.cc?.trim() || null,
+    bcc: input.bcc?.trim() || null,
     status: result.ok ? "sent" : result.skipped ? "skipped" : "failed",
     error: result.error || null,
   });
@@ -248,6 +306,9 @@ export async function sendBatch(input: {
   bodyTemplate: string;
   templateId?: string | null;
   advanceStage?: string | null;
+  cc?: string | null;
+  bcc?: string | null;
+  attachments?: OutreachAttachment[];
 }): Promise<{
   ok: boolean;
   sent: number;
@@ -286,13 +347,25 @@ export async function sendBatch(input: {
     const subject = renderTemplate(input.subjectTemplate, vars);
     const body = renderTemplate(input.bodyTemplate, vars);
 
-    const result = await sendMail({ to: contact.email, subject, body });
+    const result = await sendMail({
+      to: contact.email,
+      subject,
+      body,
+      cc: input.cc,
+      bcc: input.bcc,
+      attachments: (input.attachments ?? []).map((a) => ({
+        filename: a.filename,
+        path: a.url,
+      })),
+    });
 
     await supabase.from("outreach_sends").insert({
       contact_id: contact.id,
       template_id: input.templateId || null,
       to_email: contact.email,
       subject,
+      cc: input.cc?.trim() || null,
+      bcc: input.bcc?.trim() || null,
       status: result.ok ? "sent" : result.skipped ? "skipped" : "failed",
       error: result.error || null,
     });
