@@ -26,6 +26,14 @@ const nextConfig = {
     "*.replit.app",
     "3d7de859-bc94-4da5-a402-a15f15333d4e-00-1fol5uykybw1g.janeway.replit.dev",
   ],
+  // Server Actions cap request bodies at 1 MB by default. Attachment uploads
+  // go through a Server Action, so raise it to match the 25 MB Gmail limit —
+  // otherwise larger files close the connection mid-upload.
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "25mb",
+    },
+  },
   // Skip the type-check/lint phase during `next build`. It was OOM-ing the
   // Replit deploy worker, and we validate types separately.
   typescript: { ignoreBuildErrors: true },
