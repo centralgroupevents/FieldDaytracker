@@ -221,6 +221,7 @@ function Pipeline({
       {composeFor && (
         <ComposeModal
           contact={composeFor}
+          contacts={contacts}
           templates={templates}
           onClose={() => setComposeFor(null)}
           onSent={() => {
@@ -234,6 +235,7 @@ function Pipeline({
         <BatchComposeModal
           stage={batchStage}
           count={contacts.filter((c) => c.stage === batchStage).length}
+          contacts={contacts}
           templates={templates}
           onClose={() => setBatchStage(null)}
           onSent={() => {
@@ -417,11 +419,13 @@ function ImportForm({ onDone }: { onDone: () => void }) {
 
 function ComposeModal({
   contact,
+  contacts,
   templates,
   onClose,
   onSent,
 }: {
   contact: OutreachContact;
+  contacts: OutreachContact[];
   templates: OutreachTemplate[];
   onClose: () => void;
   onSent: () => void;
@@ -498,6 +502,13 @@ function ComposeModal({
       />
 
       <CcBccFields cc={cc} bcc={bcc} onCc={setCc} onBcc={setBcc} />
+      <RecipientQuickAdd
+        contacts={contacts}
+        stage={contact.stage}
+        excludeEmail={contact.email}
+        onCc={(emails) => setCc((v) => mergeEmails(v, emails))}
+        onBcc={(emails) => setBcc((v) => mergeEmails(v, emails))}
+      />
       <AttachmentChips
         items={attachments}
         onRemove={(i) =>
@@ -527,12 +538,14 @@ function ComposeModal({
 function BatchComposeModal({
   stage,
   count,
+  contacts,
   templates,
   onClose,
   onSent,
 }: {
   stage: string;
   count: number;
+  contacts: OutreachContact[];
   templates: OutreachTemplate[];
   onClose: () => void;
   onSent: () => void;
@@ -621,6 +634,12 @@ function BatchComposeModal({
       />
 
       <CcBccFields cc={cc} bcc={bcc} onCc={setCc} onBcc={setBcc} />
+      <RecipientQuickAdd
+        contacts={contacts}
+        stage={stage}
+        onCc={(emails) => setCc((v) => mergeEmails(v, emails))}
+        onBcc={(emails) => setBcc((v) => mergeEmails(v, emails))}
+      />
       <AttachmentChips
         items={attachments}
         onRemove={(i) =>
@@ -826,6 +845,101 @@ function AttachmentUploader({
         />
       </label>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+/** Unique, non-empty emails from a contact list, optionally excluding one. */
+function uniqueEmails(
+  contacts: OutreachContact[],
+  excludeEmail?: string
+): string[] {
+  const exclude = excludeEmail?.trim().toLowerCase();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of contacts) {
+    const email = c.email?.trim();
+    if (!email) continue;
+    const key = email.toLowerCase();
+    if (key === exclude || seen.has(key)) continue;
+    seen.add(key);
+    out.push(email);
+  }
+  return out;
+}
+
+/** Appends emails to an existing comma-separated field, de-duplicating. */
+function mergeEmails(existing: string, toAdd: string[]): string {
+  const have = new Set(
+    existing
+      .split(/[,;]/)
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const base = existing.trim().replace(/[,;]\s*$/, "");
+  const out = base ? [base] : [];
+  for (const email of toAdd) {
+    const key = email.trim().toLowerCase();
+    if (key && !have.has(key)) {
+      have.add(key);
+      out.push(email.trim());
+    }
+  }
+  return out.join(", ");
+}
+
+/** One-click buttons to dump all (or a stage's) contact emails into Cc/Bcc. */
+function RecipientQuickAdd({
+  contacts,
+  stage,
+  excludeEmail,
+  onCc,
+  onBcc,
+}: {
+  contacts: OutreachContact[];
+  stage?: string;
+  excludeEmail?: string;
+  onCc: (emails: string[]) => void;
+  onBcc: (emails: string[]) => void;
+}) {
+  const all = uniqueEmails(contacts, excludeEmail);
+  const stageList = stage
+    ? uniqueEmails(
+        contacts.filter((c) => c.stage === stage),
+        excludeEmail
+      )
+    : [];
+  if (all.length === 0) return null;
+
+  const btn =
+    "rounded bg-gray-100 px-2 py-1 font-medium text-gray-700 hover:bg-gray-200";
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-gray-500">All contacts ({all.length}):</span>
+      <button type="button" onClick={() => onCc(all)} className={btn}>
+        → Cc
+      </button>
+      <button type="button" onClick={() => onBcc(all)} className={btn}>
+        → Bcc
+      </button>
+      {stage && stageList.length > 0 && stageList.length !== all.length && (
+        <>
+          <span className="ml-2 text-gray-500">
+            {stage} ({stageList.length}):
+          </span>
+          <button type="button" onClick={() => onCc(stageList)} className={btn}>
+            → Cc
+          </button>
+          <button
+            type="button"
+            onClick={() => onBcc(stageList)}
+            className={btn}
+          >
+            → Bcc
+          </button>
+        </>
+      )}
     </div>
   );
 }
