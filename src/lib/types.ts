@@ -123,11 +123,24 @@ export interface OutreachContact {
   updated_at: string;
 }
 
+/** A file attached to a template or a one-off send. */
+export interface OutreachAttachment {
+  filename: string;
+  /** Public Supabase Storage URL. */
+  url: string;
+  size?: number;
+}
+
 export interface OutreachTemplate {
   id: string;
   name: string;
   subject: string;
   body: string;
+  /** Default CC / BCC applied when this template is used (comma-separated). */
+  cc: string | null;
+  bcc: string | null;
+  /** Files that ride along whenever this template is sent. */
+  attachments: OutreachAttachment[];
   created_at: string;
   updated_at: string;
 }
@@ -140,6 +153,8 @@ export interface OutreachSend {
   subject: string;
   status: string;
   error: string | null;
+  cc: string | null;
+  bcc: string | null;
   created_at: string;
 }
 

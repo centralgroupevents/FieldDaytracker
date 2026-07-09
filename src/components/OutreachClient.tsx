@@ -16,11 +16,13 @@ import {
   CheckCircle2,
   XCircle,
   MinusCircle,
+  Paperclip,
 } from "lucide-react";
 import {
   OUTREACH_STAGES,
   STAGE_STYLES,
   renderTemplate,
+  type OutreachAttachment,
   type OutreachContact,
   type OutreachTemplate,
   type SendLogRow,
@@ -34,6 +36,7 @@ import {
   deleteTemplate,
   sendEmail,
   sendBatch,
+  uploadAttachment,
 } from "@/app/actions/outreach";
 
 type View = "pipeline" | "templates" | "activity";
@@ -431,6 +434,9 @@ function ComposeModal({
   const [templateId, setTemplateId] = useState<string>("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
+  const [attachments, setAttachments] = useState<OutreachAttachment[]>([]);
   const [advance, setAdvance] = useState<string>("Contacted");
   const [status, setStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -441,6 +447,9 @@ function ComposeModal({
     if (t) {
       setSubject(renderTemplate(t.subject, vars));
       setBody(renderTemplate(t.body, vars));
+      setCc(t.cc || "");
+      setBcc(t.bcc || "");
+      setAttachments(t.attachments || []);
     }
   }
 
@@ -453,6 +462,9 @@ function ComposeModal({
       body,
       templateId: templateId || null,
       advanceStage: advance || null,
+      cc,
+      bcc,
+      attachments,
     });
     setSending(false);
     if (res.ok) onSent();
@@ -483,6 +495,17 @@ function ComposeModal({
         rows={8}
         placeholder="Write your message… you can edit this before sending."
         className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+
+      <CcBccFields cc={cc} bcc={bcc} onCc={setCc} onBcc={setBcc} />
+      <AttachmentChips
+        items={attachments}
+        onRemove={(i) =>
+          setAttachments((a) => a.filter((_, idx) => idx !== i))
+        }
+      />
+      <AttachmentUploader
+        onAdd={(a) => setAttachments((prev) => [...prev, a])}
       />
 
       <AdvancePicker value={advance} onChange={setAdvance} />
@@ -518,6 +541,9 @@ function BatchComposeModal({
   const [templateId, setTemplateId] = useState<string>("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
+  const [attachments, setAttachments] = useState<OutreachAttachment[]>([]);
   const [advance, setAdvance] = useState<string>("Contacted");
   const [status, setStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -528,6 +554,9 @@ function BatchComposeModal({
     if (t) {
       setSubject(t.subject);
       setBody(t.body);
+      setCc(t.cc || "");
+      setBcc(t.bcc || "");
+      setAttachments(t.attachments || []);
     }
   }
 
@@ -546,6 +575,9 @@ function BatchComposeModal({
       bodyTemplate: body,
       templateId: templateId || null,
       advanceStage: advance || null,
+      cc,
+      bcc,
+      attachments,
     });
     setSending(false);
     if (res.ok) {
@@ -586,6 +618,17 @@ function BatchComposeModal({
         rows={8}
         placeholder={"Hi {{name}},\n\n…"}
         className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+
+      <CcBccFields cc={cc} bcc={bcc} onCc={setCc} onBcc={setBcc} />
+      <AttachmentChips
+        items={attachments}
+        onRemove={(i) =>
+          setAttachments((a) => a.filter((_, idx) => idx !== i))
+        }
+      />
+      <AttachmentUploader
+        onAdd={(a) => setAttachments((prev) => [...prev, a])}
       />
 
       <AdvancePicker value={advance} onChange={setAdvance} />
@@ -686,6 +729,107 @@ function AdvancePicker({
   );
 }
 
+function CcBccFields({
+  cc,
+  bcc,
+  onCc,
+  onBcc,
+}: {
+  cc: string;
+  bcc: string;
+  onCc: (v: string) => void;
+  onBcc: (v: string) => void;
+}) {
+  return (
+    <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <input
+        value={cc}
+        onChange={(e) => onCc(e.target.value)}
+        placeholder="Cc (comma-separated)"
+        className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+      <input
+        value={bcc}
+        onChange={(e) => onBcc(e.target.value)}
+        placeholder="Bcc (comma-separated)"
+        className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+    </div>
+  );
+}
+
+function AttachmentChips({
+  items,
+  onRemove,
+}: {
+  items: OutreachAttachment[];
+  onRemove?: (index: number) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-2 flex flex-wrap gap-1.5">
+      {items.map((a, i) => (
+        <span
+          key={a.url}
+          className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-700"
+        >
+          <Paperclip className="h-3 w-3 shrink-0" />
+          <span className="max-w-[160px] truncate">{a.filename}</span>
+          {onRemove && (
+            <button
+              type="button"
+              onClick={() => onRemove(i)}
+              className="text-gray-400 hover:text-red-600"
+              title="Remove"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AttachmentUploader({
+  onAdd,
+}: {
+  onAdd: (a: OutreachAttachment) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setBusy(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await uploadAttachment(fd);
+    setBusy(false);
+    e.target.value = ""; // allow re-picking the same file
+    if (res.ok && res.attachment) onAdd(res.attachment);
+    else setError(res.error || "Upload failed.");
+  }
+
+  return (
+    <div className="mb-2">
+      <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200">
+        <Paperclip className="h-4 w-4" />
+        {busy ? "Uploading…" : "Attach file"}
+        <input
+          type="file"
+          className="hidden"
+          onChange={onChange}
+          disabled={busy}
+        />
+      </label>
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 // ===========================================================================
 // TEMPLATES
 // ===========================================================================
@@ -761,6 +905,11 @@ function TemplateEditor({
   const [name, setName] = useState(template?.name || "");
   const [subject, setSubject] = useState(template?.subject || "");
   const [body, setBody] = useState(template?.body || "");
+  const [cc, setCc] = useState(template?.cc || "");
+  const [bcc, setBcc] = useState(template?.bcc || "");
+  const [attachments, setAttachments] = useState<OutreachAttachment[]>(
+    template?.attachments || []
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -772,6 +921,9 @@ function TemplateEditor({
       name,
       subject,
       body,
+      cc,
+      bcc,
+      attachments,
     });
     setBusy(false);
     if (res.ok) onDone();
@@ -811,6 +963,20 @@ function TemplateEditor({
         rows={8}
         placeholder={"Hi {{name}},\n\n…"}
         className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+      />
+      <p className="text-xs text-gray-500">
+        Default Cc/Bcc and files below ride along every time this template is
+        sent (editable per send).
+      </p>
+      <CcBccFields cc={cc} bcc={bcc} onCc={setCc} onBcc={setBcc} />
+      <AttachmentChips
+        items={attachments}
+        onRemove={(i) =>
+          setAttachments((a) => a.filter((_, idx) => idx !== i))
+        }
+      />
+      <AttachmentUploader
+        onAdd={(a) => setAttachments((prev) => [...prev, a])}
       />
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex items-center gap-2">
