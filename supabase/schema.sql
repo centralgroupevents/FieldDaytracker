@@ -18,10 +18,14 @@ begin
       'Pending Order',
       'Shipped',
       'Delivered',
-      'Picked Up'
+      'Picked Up',
+      'Refunded'
     );
   end if;
 end$$;
+
+-- Upgrade path for databases created before 'Refunded' existed.
+alter type inventory_status add value if not exists 'Refunded';
 
 -- ----------------------------------------------------------------------------
 -- inventory_items
