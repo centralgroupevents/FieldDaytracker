@@ -4,6 +4,7 @@ import { ExternalLink, Package } from "lucide-react";
 import { trackingLink, type InventoryItem } from "@/lib/types";
 import StatusSelect from "./StatusSelect";
 import QuickEdit from "./QuickEdit";
+import DeleteItemButton from "./DeleteItemButton";
 
 /** Carrier + clickable tracking link (or a plain dash when none). */
 function CarrierCell({ item }: { item: InventoryItem }) {
@@ -86,6 +87,7 @@ export default function InventoryList({ items }: { items: InventoryItem[] }) {
                 <LabeledStepper label="Needed">
                   <QuickEdit id={item.id} value={item.target_quantity} field="target" />
                 </LabeledStepper>
+                <DeleteItemButton id={item.id} itemName={item.item_name} />
               </div>
             </div>
           </li>
@@ -104,6 +106,9 @@ export default function InventoryList({ items }: { items: InventoryItem[] }) {
               <th className="px-4 py-3 text-center font-medium">Needed</th>
               <th className="px-4 py-3 text-right font-medium">Δ</th>
               <th className="px-4 py-3 text-right font-medium">Total</th>
+              <th className="px-4 py-3 text-right font-medium">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -153,6 +158,11 @@ export default function InventoryList({ items }: { items: InventoryItem[] }) {
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
                   {money(item.total_cost)}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex justify-end">
+                    <DeleteItemButton id={item.id} itemName={item.item_name} />
+                  </div>
                 </td>
               </tr>
             ))}
