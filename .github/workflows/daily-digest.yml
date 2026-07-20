@@ -1,0 +1,17 @@
+name: Daily task digest
+
+on:
+  schedule:
+    # 12:00 UTC = 8:00 AM ET during daylight saving time.
+    - cron: "0 12 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger digest send on the Replit deployment
+        run: |
+          curl -fsS --retry 3 --retry-delay 30 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://fielddaytracker.replit.app/api/digest/send"
