@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import type { InventoryItem } from "./types";
+import { resolveGoogleCredentials, sheetsAuth } from "./google-auth";
 
 /**
  * Appends one row to the master Google Sheet for an item that reached a
@@ -16,29 +17,19 @@ import type { InventoryItem } from "./types";
 export async function appendItemToSheet(
   item: InventoryItem
 ): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
   const spreadsheetId = process.env.GOOGLE_SHEET_ID;
   const range = process.env.GOOGLE_SHEET_RANGE || "Master!A:H";
+  const creds = resolveGoogleCredentials("sheets");
 
-  if (!email || !rawKey || !spreadsheetId) {
+  if (!creds || !spreadsheetId) {
     console.warn(
-      "[sheets] Skipping append — Google service-account env vars not all set."
+      "[sheets] Skipping append — Google service-account creds / GOOGLE_SHEET_ID not all set."
     );
     return { ok: false, skipped: true };
   }
 
-  // Env vars store the key with literal \n; convert back to real newlines.
-  const privateKey = rawKey.replace(/\\n/g, "\n");
-
   try {
-    const auth = new google.auth.JWT({
-      email,
-      key: privateKey,
-      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-    });
-
-    const sheets = google.sheets({ version: "v4", auth });
+    const sheets = google.sheets({ version: "v4", auth: sheetsAuth(creds) });
 
     const row = [
       new Date().toISOString(),

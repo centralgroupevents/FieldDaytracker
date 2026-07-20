@@ -1,5 +1,6 @@
 import { google, type sheets_v4 } from "googleapis";
 import crypto from "node:crypto";
+import { resolveGoogleCredentials, sheetsAuth } from "./google-auth";
 
 /**
  * Daily task digest, News-Scout style.
@@ -61,18 +62,9 @@ export function getBaseUrl(): string {
 }
 
 function getSheetsClient(): sheets_v4.Sheets | null {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
-  if (!email || !rawKey) {
-    console.warn("[digest] Google service-account env vars not set.");
-    return null;
-  }
-  const auth = new google.auth.JWT({
-    email,
-    key: rawKey.replace(/\\n/g, "\n"),
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
-  return google.sheets({ version: "v4", auth });
+  const creds = resolveGoogleCredentials("digest");
+  if (!creds) return null;
+  return google.sheets({ version: "v4", auth: sheetsAuth(creds) });
 }
 
 function getSpreadsheetId(): string | undefined {
@@ -190,8 +182,18 @@ export async function buildDigests(
 ): Promise<{ digests: TeammateDigest[]; error?: string }> {
   const sheets = getSheetsClient();
   const spreadsheetId = getSpreadsheetId();
-  if (!sheets || !spreadsheetId) {
-    return { digests: [], error: "Google Sheets credentials not configured." };
+  if (!sheets) {
+    return {
+      digests: [],
+      error:
+        "Google service-account credentials not found. Set GOOGLE_SERVICE_ACCOUNT_JSON (the whole key JSON), or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY.",
+    };
+  }
+  if (!spreadsheetId) {
+    return {
+      digests: [],
+      error: "Set DIGEST_SHEET_ID (or GOOGLE_SHEET_ID) to the spreadsheet ID.",
+    };
   }
   const gid = process.env.DIGEST_SHEET_GID || "290694620";
   const title = await resolveTabTitle(sheets, spreadsheetId, gid);
