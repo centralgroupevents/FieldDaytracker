@@ -13,10 +13,10 @@ export const maxDuration = 60;
 
 /**
  * Sends the daily task digest to every teammate in TEAM_EMAILS.
- * Triggered by the Vercel cron in vercel.json (or any scheduler).
+ * Triggered daily by the GitHub Action in .github/workflows/daily-digest.yml.
  *
- * Auth: Vercel cron sends `Authorization: Bearer ${CRON_SECRET}` automatically
- * when the CRON_SECRET env var is set. Manual runs can pass `?key=CRON_SECRET`.
+ * Auth: requires `Authorization: Bearer ${CRON_SECRET}` or `?key=CRON_SECRET`
+ * when the CRON_SECRET env var is set.
  *
  * Testing helpers:
  *   ?dry=1        render instead of send — returns the first digest's HTML

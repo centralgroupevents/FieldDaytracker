@@ -83,7 +83,7 @@ See [`.env.local.example`](.env.local.example) for the full annotated list.
 | `DIGEST_SHEET_ID` / `DIGEST_SHEET_GID` | Planning spreadsheet + schedule tab gid for the daily digest (defaults: `GOOGLE_SHEET_ID` / `290694620`) |
 | `TEAM_EMAILS` | JSON map of teammate → email, e.g. `{"Anthony":"a@x.com","Ab":"b@x.com","Calvin":"c@x.com","Pri":"p@x.com"}` |
 | `DIGEST_SECRET` | HMAC secret signing the Done / In Progress email buttons (any long random string) |
-| `CRON_SECRET` | Protects `/api/digest/send`; Vercel cron sends it automatically |
+| `CRON_SECRET` | Protects `/api/digest/send`; the GitHub Action sends it as a Bearer token (set the same value as a GitHub Actions secret) |
 | `APP_BASE_URL` | Public URL of the deployed app, used in email button links |
 
 Every integration **degrades gracefully**: if its keys are missing the app logs
@@ -121,7 +121,8 @@ Verify a sending domain (or use the Resend test domain), then set
 
 ### Daily task digest emails
 
-Every morning (12:00 UTC = 8 AM ET, via the Vercel cron in `vercel.json`),
+Every morning (12:00 UTC = 8 AM ET, via the GitHub Action in
+[`.github/workflows/daily-digest.yml`](.github/workflows/daily-digest.yml)),
 `/api/digest/send` reads the **Team Daily Schedule** tab of the planning
 spreadsheet and emails each teammate a newsletter-style digest of their tasks
 from the past 2 days plus the upcoming week. Each day-block shows the deadline
@@ -136,7 +137,11 @@ Setup:
    schedule tab's gid (the number after `gid=` in the browser URL).
 3. Set `TEAM_EMAILS` — keys must match the name columns in the schedule's
    header row (Anthony, Ab, Calvin, Pri).
-4. Set `DIGEST_SECRET`, `CRON_SECRET`, and `APP_BASE_URL`.
+4. Set `DIGEST_SECRET`, `CRON_SECRET`, and `APP_BASE_URL` in Replit Secrets,
+   and add the same `CRON_SECRET` value in GitHub →
+   *Settings → Secrets and variables → Actions* so the workflow can call the
+   endpoint. The workflow can also be run on demand from the Actions tab
+   ("Daily task digest" → *Run workflow*).
 5. Test without sending: open
    `https://YOUR_DOMAIN/api/digest/send?key=CRON_SECRET&dry=1&to=Anthony`
    to preview the rendered email; drop `dry=1` to actually send.
