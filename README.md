@@ -79,7 +79,8 @@ See [`.env.local.example`](.env.local.example) for the full annotated list.
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only; used by the AfterShip webhook (bypasses RLS) |
 | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `NOTIFY_EMAIL` | Transactional email |
 | `AFTERSHIP_API_KEY` / `AFTERSHIP_WEBHOOK_SECRET` | Tracking + webhook signature verification |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_PRIVATE_KEY` / `GOOGLE_SHEET_ID` / `GOOGLE_SHEET_RANGE` | Master spreadsheet sync |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` **or** `GOOGLE_SERVICE_ACCOUNT_EMAIL` + `GOOGLE_PRIVATE_KEY` | Service-account credentials. Easiest: paste the whole downloaded key JSON into `GOOGLE_SERVICE_ACCOUNT_JSON`. (Also accepts `GOOGLE_APPLICATION_CREDENTIALS` = path to the JSON file.) |
+| `GOOGLE_SHEET_ID` / `GOOGLE_SHEET_RANGE` | Master spreadsheet sync target |
 | `DIGEST_SHEET_ID` / `DIGEST_SHEET_GID` | Planning spreadsheet + schedule tab gid for the daily digest (defaults: `GOOGLE_SHEET_ID` / `290694620`) |
 | `TEAM_EMAILS` | JSON map of teammate → email, e.g. `{"Anthony":"a@x.com","Ab":"b@x.com","Calvin":"c@x.com","Pri":"p@x.com"}` |
 | `DIGEST_SECRET` | HMAC secret signing the Done / In Progress email buttons (any long random string) |
