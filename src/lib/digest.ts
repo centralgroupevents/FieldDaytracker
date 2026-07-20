@@ -171,34 +171,32 @@ function splitTasks(cell: string): string[] {
     .filter((t) => t.length > 1);
 }
 
+interface ScheduleData {
+  rows: string[][];
+  headerIdx: number;
+  people: { name: string; col: number }[];
+}
+
 /**
- * Builds one digest per teammate covering [start, end] (inclusive).
- * Teammates come from the schedule's header row; only those present in
- * `emails` (case-insensitive) get a digest.
+ * Fetches and parses the schedule tab: locates the header row and the
+ * per-teammate columns. Shared by the email digest and the live task board.
  */
-export async function buildDigests(
-  start: Date,
-  end: Date
-): Promise<{ digests: TeammateDigest[]; error?: string }> {
+async function loadSchedule(): Promise<{ data?: ScheduleData; error?: string }> {
   const sheets = getSheetsClient();
   const spreadsheetId = getSpreadsheetId();
   if (!sheets) {
     return {
-      digests: [],
       error:
         "Google service-account credentials not found. Set GOOGLE_SERVICE_ACCOUNT_JSON (the whole key JSON), or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY.",
     };
   }
   if (!spreadsheetId) {
-    return {
-      digests: [],
-      error: "Set DIGEST_SHEET_ID (or GOOGLE_SHEET_ID) to the spreadsheet ID.",
-    };
+    return { error: "Set DIGEST_SHEET_ID (or GOOGLE_SHEET_ID) to the spreadsheet ID." };
   }
   const gid = process.env.DIGEST_SHEET_GID || "290694620";
   const title = await resolveTabTitle(sheets, spreadsheetId, gid);
   if (!title) {
-    return { digests: [], error: `No tab with gid ${gid} in spreadsheet.` };
+    return { error: `No tab with gid ${gid} in spreadsheet.` };
   }
 
   const res = await sheets.spreadsheets.values.get({
@@ -215,7 +213,7 @@ export async function buildDigests(
       r.slice(3).some((c) => (c ?? "").trim().length > 0)
   );
   if (headerIdx === -1) {
-    return { digests: [], error: "Could not find the schedule header row." };
+    return { error: "Could not find the schedule header row." };
   }
 
   const header = rows[headerIdx];
@@ -229,6 +227,21 @@ export async function buildDigests(
       });
     }
   }
+  return { data: { rows, headerIdx, people } };
+}
+
+/**
+ * Builds one digest per teammate covering [start, end] (inclusive).
+ * Teammates come from the schedule's header row; only those present in
+ * `emails` (case-insensitive) get a digest.
+ */
+export async function buildDigests(
+  start: Date,
+  end: Date
+): Promise<{ digests: TeammateDigest[]; error?: string }> {
+  const { data, error } = await loadSchedule();
+  if (error || !data) return { digests: [], error };
+  const { rows, headerIdx, people } = data;
 
   const emails = getTeamEmails();
   const emailFor = (name: string): string | undefined => {
@@ -265,6 +278,157 @@ export async function buildDigests(
     digests.push({ name: person.name, email, days });
   }
   return { digests };
+}
+
+// ---------------------------------------------------------------------------
+// Live task board (mirrors the schedule tab, grouped by day)
+// ---------------------------------------------------------------------------
+
+export type TaskStatus = "done" | "progress";
+
+/** One teammate's tasks for one day. */
+export interface BoardBlock {
+  person: string;
+  milestone: string | null;
+  tasks: string[];
+  /** Current status, from the Task Status tab (null = not started). */
+  status: TaskStatus | null;
+  /** ISO day key, e.g. "2026-07-20" — matches the email button's key. */
+  dayKey: string;
+  /** Status-button label (mirrors the email). */
+  label: string;
+}
+
+export interface BoardDay {
+  dayKey: string;
+  dateLabel: string;
+  kicker: string;
+  isToday: boolean;
+  blocks: BoardBlock[];
+}
+
+export interface Board {
+  days: BoardDay[];
+  people: string[];
+  counts: { today: number; overdue: number; total: number };
+}
+
+/**
+ * Reads the Task Status tab into a map keyed by `${person}|${dayKey}` (person
+ * lowercased). The append log is in chronological order, so later rows win.
+ */
+async function readStatusMap(): Promise<Map<string, TaskStatus>> {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId();
+  const map = new Map<string, TaskStatus>();
+  if (!sheets || !spreadsheetId) return map;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${STATUS_TAB}'!A:E`,
+    });
+    const rows = (res.data.values as string[][]) ?? [];
+    for (const r of rows.slice(1)) {
+      const person = (r[1] ?? "").trim().toLowerCase();
+      const day = (r[2] ?? "").trim();
+      const status = (r[3] ?? "").trim().toLowerCase();
+      if (!person || !day) continue;
+      map.set(`${person}|${day}`, status.startsWith("done") ? "done" : "progress");
+    }
+  } catch {
+    // Task Status tab may not exist yet — nothing to overlay.
+  }
+  return map;
+}
+
+/**
+ * Builds the whole-team board for [start, end], grouped by day. Each day holds
+ * one block per teammate who has tasks that day, with the current status
+ * overlaid from the Task Status tab.
+ */
+export async function buildBoard(
+  start: Date,
+  end: Date
+): Promise<{ board?: Board; error?: string }> {
+  const { data, error } = await loadSchedule();
+  if (error || !data) return { error };
+  const { rows, headerIdx, people } = data;
+
+  const statusMap = await readStatusMap();
+  const today = todayInTeamTz();
+  const todayKey = today.toISOString().slice(0, 10);
+  const dayMap = new Map<string, BoardDay>();
+
+  for (const row of rows.slice(headerIdx + 1)) {
+    const date = parseScheduleDate(row[0] ?? "", today);
+    if (!date || date < start || date > end) continue;
+    const dayKey = date.toISOString().slice(0, 10);
+    const milestone = (row[2] ?? "").trim() || null;
+
+    let day = dayMap.get(dayKey);
+    if (!day) {
+      day = {
+        dayKey,
+        dateLabel: formatDay(date),
+        kicker: kickerFor(date, today),
+        isToday: dayKey === todayKey,
+        blocks: [],
+      };
+      dayMap.set(dayKey, day);
+    }
+
+    for (const person of people) {
+      const tasks = splitTasks(row[person.col] ?? "");
+      if (tasks.length === 0) continue;
+      const existing = day.blocks.find((b) => b.person === person.name);
+      if (existing) {
+        existing.tasks.push(...tasks);
+        if (!existing.milestone && milestone) existing.milestone = milestone;
+      } else {
+        day.blocks.push({
+          person: person.name,
+          milestone,
+          tasks,
+          status: statusMap.get(`${person.name.toLowerCase()}|${dayKey}`) ?? null,
+          dayKey,
+          label: (milestone || day.dateLabel).slice(0, 80),
+        });
+      }
+    }
+  }
+
+  const days = [...dayMap.values()]
+    .filter((d) => d.blocks.length > 0)
+    .sort((a, b) => a.dayKey.localeCompare(b.dayKey));
+
+  // Order blocks within each day by the schedule's people order.
+  const order = new Map(people.map((p, i) => [p.name, i]));
+  for (const day of days) {
+    day.blocks.sort(
+      (a, b) => (order.get(a.person) ?? 0) - (order.get(b.person) ?? 0)
+    );
+  }
+
+  let todayCount = 0;
+  let overdueCount = 0;
+  let total = 0;
+  for (const day of days) {
+    for (const block of day.blocks) {
+      total += block.tasks.length;
+      if (day.dayKey === todayKey) todayCount += block.tasks.length;
+      if (day.dayKey < todayKey && block.status !== "done") {
+        overdueCount += block.tasks.length;
+      }
+    }
+  }
+
+  return {
+    board: {
+      days,
+      people: people.map((p) => p.name),
+      counts: { today: todayCount, overdue: overdueCount, total },
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

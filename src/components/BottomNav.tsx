@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
+  ListChecks,
   Package,
   Wallet,
   PlusCircle,
@@ -12,6 +13,7 @@ import {
 
 const ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/tasks", label: "Tasks", icon: ListChecks },
   { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/expenses", label: "Expenses", icon: Wallet },
   { href: "/outreach", label: "Outreach", icon: Send },
